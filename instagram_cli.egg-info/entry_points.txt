@@ -1,0 +1,2 @@
+[console_scripts]
+instagram = instagram_cli.main:main
