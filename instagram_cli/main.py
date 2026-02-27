@@ -56,8 +56,8 @@ def _print_post_setup_help() -> None:
   print("  instagram")
   print("  profile lupikovoleg")
   print("  reel https://www.instagram.com/reel/<code>/")
-  print("  сколько подписчиков у аккаунта lupikovoleg")
-  print("  сколько лайков на последнем ролике")
+  print("  how many followers does lupikovoleg have?")
+  print("  how many likes does the latest reel have?")
   print("  help")
   print("=" * 64 + "\n")
 

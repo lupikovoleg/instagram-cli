@@ -254,8 +254,8 @@ class OpenRouterAgent:
           },
         )
     fallback = (
-      "Не удалось завершить запрос за разумное число шагов инструментов. "
-      "Уточни запрос или пришли ссылку/username."
+      "Could not complete the request within the tool-step limit. "
+      "Please clarify the request or share a valid profile/reel link or username."
     )
     if on_stream_chunk:
       for char in fallback:

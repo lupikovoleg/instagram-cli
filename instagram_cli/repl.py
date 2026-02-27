@@ -249,10 +249,10 @@ def _print_help() -> None:
     "- reload: reload env from files\n"
     "- exit | quit: close CLI\n"
     "\nNatural language works via tool calling (examples):\n"
-    "- сколько подписчиков у аккаунта lupikovoleg\n"
-    "- есть ли stories у @username\n"
-    "- скинуть ссылку на профиль или reels\n"
-    "- сколько лайков на последнем ролике\n",
+    "- how many followers does lupikovoleg have?\n"
+    "- does @username have stories?\n"
+    "- paste a profile or reel link\n"
+    "- how many likes does the latest reel have?\n",
   )
 
 
