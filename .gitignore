@@ -35,6 +35,7 @@ htmlcov/
 
 # Local logs
 *.log
+output/
 
 # IDE/editor files
 .idea/
@@ -45,4 +46,3 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
-

@@ -9,19 +9,39 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
   - `engagement_rate`
   - publish time (`local` + `UTC`)
   - `viral_index`
+  - trial/main reel signal when available
 - Fetch profile stats by URL or username:
   - followers, following, post count
   - `verified` / `private`
   - stories availability (`has_stories`, `stories_count`)
+- Fetch filtered profile reels:
+  - latest reels
+  - reels from the last `N` days
+  - trial-only or main-only reels
+- Fetch media audience data:
+  - media comments
+  - media likers
+  - ranked likers by follower count
+- Inspect followers with request-budget controls:
+  - fetch one followers page with low API cost
+  - estimate `top followers` from a bounded sampled subset
+  - explicit API budget reporting (`page_requests`, `profile_lookups`, `cache_hits`)
+- Export the current collection:
+  - `csv`
+  - `json`
 - Natural-language queries (no command prefix required):
   - `how many followers does lupikovoleg have?`
   - `does @username have stories?`
   - `how many likes does the latest reel have?`
+  - `who are the top followers of @username?`
+  - `show the last 5 trial reels from this profile from the last week`
+  - `export that to csv`
   - paste a profile or reel URL directly
 - Session memory:
   - current profile
-  - current reel
+  - current reel / media
   - recent reels for follow-up questions
+  - last collection for export and follow-up actions
 - Agent mode:
   - model selects tools via tool calling
   - stats are fetched from APIs (not guessed)
@@ -77,10 +97,19 @@ Example prompts:
 
 ```text
 instagram> profile lupikovoleg
+instagram> followers lupikovoleg 20
+instagram> top-followers lupikovoleg 25 10
 instagram> reel https://www.instagram.com/reel/XXXXXXXXXXX/
+instagram> reels lupikovoleg 5 7 trial
+instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 20
+instagram> likers https://www.instagram.com/reel/XXXXXXXXXXX/ 20
+instagram> export csv latest-trial-reels
 instagram> how many followers does lupikovoleg have?
 instagram> does @lupikovoleg have stories?
 instagram> how many likes does the latest reel have?
+instagram> who are the top followers of @lupikovoleg?
+instagram> show the last 5 trial reels from this profile from the last week
+instagram> export that to csv
 ```
 
 ## Commands
@@ -89,6 +118,12 @@ instagram> how many likes does the latest reel have?
 - `actions` — show available actions
 - `reel <instagram_reel_url>` — fetch reel stats
 - `profile <instagram_profile_url_or_username>` — fetch profile stats
+- `reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]` — fetch filtered reels
+- `comments <instagram_media_url> [limit]` — fetch media comments
+- `likers <instagram_media_url> [limit]` — fetch media likers
+- `followers <instagram_profile_url_or_username> [limit]` — fetch one follower page
+- `top-followers <instagram_profile_url_or_username> [sample_size] [top_n]` — approximate biggest followers
+- `export <csv|json> [filename_hint]` — export the most recent collection in session
 - `stats <url_or_username>` — auto-detect target type
 - `ask <question>` — ask the agent
 - `model` — show current model
@@ -126,9 +161,53 @@ Optional:
   - `get_profile_stats`
   - `get_reel_stats`
   - `get_recent_reels`
+  - `get_profile_reels`
+  - `get_followers_page`
+  - `get_top_followers`
+  - `get_media_comments`
+  - `get_media_likers`
+  - `rank_media_likers_by_followers`
   - `get_last_reel_metric`
+  - `export_session_data`
   - `get_session_context`
 - For simple direct input (single URL or username), CLI can call stats endpoints directly.
+
+## Trial Reel Detection
+
+- Trial-vs-main detection uses `/v1/user/clips/chunk`.
+- The current heuristic is:
+  - `trial`: `product_type == "clips"` and `reshare_count` is missing
+  - `main`: reel payload includes `reshare_count`
+- This is based on the current HikerAPI documentation and payload behavior.
+
+## Natural-Language Patterns
+
+The agent is configured to handle follow-up context such as:
+
+- `show the last 5 trial reels from this profile from the last week`
+- `what about the main reels?`
+- `export that to csv`
+- `show comments for this post`
+- `who liked this reel?`
+- `rank those likers by followers`
+
+When the target is omitted, the CLI uses current session context first:
+
+- current profile
+- current reel / media
+- recent reels
+- last fetched collection
+
+## Follower Cost Control
+
+- Default follower-page strategy: `/g2/user/followers`
+- `top-followers` is intentionally approximate:
+  - it samples a bounded subset of followers
+  - then enriches only that subset with profile lookups
+  - it reports the request budget used
+- This avoids accidental full follower crawls that could burn HikerAPI credits.
+- Ranked media likers by follower count can also be expensive because every liker profile must be enriched.
+- If you need full-account follower ranking, build it as an explicit batch/export job, not as an open-ended chat request.
 
 ## Troubleshooting
 
@@ -141,6 +220,8 @@ Optional:
   - ensure you are in interactive TTY (not piping stdin)
 - Target parsing is wrong
   - use explicit commands: `profile ...` or `reel ...`
+  - for filtered reel analysis use `reels ...`
+  - for audience data use `comments ...` or `likers ...`
 
 ## Security Notes
 
