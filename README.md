@@ -107,6 +107,7 @@ Example prompts:
 instagram> profile lupikovoleg
 instagram> search portugal creators
 instagram> open 1
+instagram> update
 instagram> followers lupikovoleg 20
 instagram> top-followers lupikovoleg 25 10
 instagram> reel https://www.instagram.com/reel/XXXXXXXXXXX/
@@ -158,6 +159,7 @@ instagram> download these stories
 - `ask <question>` — ask the agent
 - `model` — show current model
 - `model <openrouter_model_id>` — switch model for current session
+- `update` — fast-forward update the local git repo if remote commits exist
 - `render` — show current output mode
 - `render <rich|plain>` — switch output mode
 - `last` — print raw JSON for latest fetched stats
@@ -208,6 +210,22 @@ Optional:
   - `export_session_data`
   - `get_session_context`
 - For simple direct input (single URL or username), CLI can call stats endpoints directly.
+
+## Repo Updates
+
+- On startup, the CLI checks whether the local git repo is behind its upstream branch.
+- If new commits exist, the banner shows an update notice.
+- To update safely, run:
+
+```text
+update
+```
+
+Behavior:
+
+- uses `git pull --ff-only`
+- refuses to update if the working tree is dirty
+- refuses automatic update if the branch diverged
 
 ## Natural-Language Patterns
 

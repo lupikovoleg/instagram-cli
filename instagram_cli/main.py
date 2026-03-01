@@ -5,7 +5,8 @@ import getpass
 import sys
 from pathlib import Path
 
-from instagram_cli.config import Settings, upsert_env_values
+from instagram_cli.config import Settings, get_project_root, upsert_env_values
+from instagram_cli.git_updates import check_for_updates
 from instagram_cli.repl import run_repl, write_shell_wrapper
 
 
@@ -124,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
 
   settings = Settings.load()
   settings = _ensure_bootstrapped_settings(settings)
-  return run_repl(settings)
+  update_status = check_for_updates(get_project_root())
+  return run_repl(settings, update_status=update_status)
 
 
 if __name__ == "__main__":

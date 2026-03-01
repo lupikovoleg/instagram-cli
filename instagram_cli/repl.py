@@ -13,15 +13,22 @@ from pathlib import Path
 from typing import Any
 
 try:
+  from rich.align import Align
   from rich.console import Console
+  from rich.panel import Panel
+  from rich.text import Text
   from rich.live import Live
   from rich.markdown import Markdown
 except ImportError:  # pragma: no cover
+  Align = None  # type: ignore[assignment]
   Console = None  # type: ignore[assignment]
+  Panel = None  # type: ignore[assignment]
+  Text = None  # type: ignore[assignment]
   Live = None  # type: ignore[assignment]
   Markdown = None  # type: ignore[assignment]
 
 from instagram_cli.config import Settings
+from instagram_cli.git_updates import GitUpdateStatus, check_for_updates, fast_forward_update
 from instagram_cli.hiker_api import (
   HikerApiClient,
   HikerApiError,
@@ -548,8 +555,9 @@ _ASCII_ART = r"""
  | ||  \| \___ \ | | / _ \| |  _| |_) |  / _ \ | |\/| |   | |   | |    | |
  | || |\  |___) || |/ ___ \ |_| |  _ <  / ___ \| |  | |   | |___| |___ | |
 |___|_| \_|____/ |_/_/   \_\____|_| \_\/_/   \_\_|  |_|    \____|_____|___|
-                           INSTAGRAM-CLI by @lupikovoleg
 """
+
+_ASCII_TAGLINE = "INSTAGRAM-CLI by @lupikovoleg"
 
 
 def _default_render_mode() -> str:
@@ -573,16 +581,83 @@ def _profile_url(username: str | None) -> str | None:
   return f"https://www.instagram.com/{candidate}/"
 
 
-def _print_banner(settings: Settings, state: SessionState) -> None:
-  print(_ASCII_ART.rstrip())
-  print("Type 'help' for commands. Type 'exit' to quit.\n")
-  print(f"- OpenRouter model: {settings.openrouter_chat_model}")
-  print(f"- HikerAPI configured: {'yes' if settings.hiker_access_key else 'no'}")
-  print(f"- Output mode: {_render_mode_label(state.render_mode)}")
+def _banner_status_lines(settings: Settings, state: SessionState, update_status: GitUpdateStatus | None = None) -> list[str]:
+  lines = [
+    "Type 'help' for commands. Type 'exit' to quit.",
+    f"OpenRouter model: {settings.openrouter_chat_model}",
+    f"HikerAPI configured: {'yes' if settings.hiker_access_key else 'no'}",
+    f"Output mode: {_render_mode_label(state.render_mode)}",
+  ]
   if settings.loaded_env_files:
     loaded = ", ".join(str(path) for path in settings.loaded_env_files)
-    print(f"- Loaded .env: {loaded}")
+    lines.append(f"Loaded .env: {loaded}")
+  if update_status is not None and update_status.available:
+    if update_status.has_updates:
+      lines.append(
+        f"Update available: {update_status.behind} new commit(s) on {update_status.upstream}. Run 'update' to fast-forward.",
+      )
+    elif update_status.fetch_error:
+      lines.append(f"Update check warning: {update_status.fetch_error}")
+  return lines
+
+
+def _print_plain_banner(settings: Settings, state: SessionState, update_status: GitUpdateStatus | None = None) -> None:
+  print(_ASCII_ART.rstrip())
+  print(f"                           {_ASCII_TAGLINE}")
   print("")
+  for line in _banner_status_lines(settings, state, update_status):
+    print(f"- {line}")
+  print("")
+
+
+def _print_rich_banner(settings: Settings, state: SessionState, update_status: GitUpdateStatus | None = None) -> None:
+  if _RICH_CONSOLE is None or Text is None or Panel is None or Align is None:
+    _print_plain_banner(settings, state, update_status)
+    return
+
+  art_lines = [line.rstrip() for line in _ASCII_ART.strip("\n").splitlines()]
+  palette = ["#ff5c8a", "#ff7a59", "#ffb347", "#73d2de", "#4ea8de"]
+  art = Text()
+  for index, line in enumerate(art_lines):
+    art.append(line, style=palette[min(index, len(palette) - 1)] + " bold")
+    art.append("\n")
+  art.append(_ASCII_TAGLINE.center(max(len(line) for line in art_lines)), style="#f6e58d bold")
+
+  status = Text()
+  status_styles = {
+    "OpenRouter model:": "#73d2de",
+    "HikerAPI configured:": "#73d2de",
+    "Output mode:": "#73d2de",
+    "Loaded .env:": "#73d2de",
+    "Update available:": "#ffb347",
+    "Update check warning:": "#ff7a59",
+  }
+  for raw_line in _banner_status_lines(settings, state, update_status):
+    style = "#dfe6e9"
+    for prefix, color in status_styles.items():
+      if raw_line.startswith(prefix):
+        style = color
+        break
+    status.append("• ", style="#636e72")
+    status.append(raw_line, style=style)
+    status.append("\n")
+
+  panel = Panel(
+    Align.center(art),
+    border_style="#444b6e",
+    padding=(1, 2),
+    subtitle="terminal analytics",
+    subtitle_align="right",
+  )
+  _RICH_CONSOLE.print(panel)
+  _RICH_CONSOLE.print(status)
+
+
+def _print_banner(settings: Settings, state: SessionState, update_status: GitUpdateStatus | None = None) -> None:
+  if _RICH_CONSOLE is not None and _RICH_CONSOLE.is_terminal:
+    _print_rich_banner(settings, state, update_status)
+    return
+  _print_plain_banner(settings, state, update_status)
 
 
 def _format_pct(value: float) -> str:
@@ -890,6 +965,7 @@ def _print_help() -> None:
     "- ask <question>: ask AI agent with tool calling\n"
     "- model: show active AI model\n"
     "- model <openrouter_model_id>: switch model for this session\n"
+    "- update: fast-forward update the local git repo if remote commits exist\n"
     "- render: show current output mode\n"
     "- render <rich|plain>: switch output mode\n"
     "- last: print raw JSON for last fetched stats\n"
@@ -930,8 +1006,9 @@ def _print_actions() -> None:
     "10. Rank likers by follower count when explicitly requested.\n"
     "11. Export the current collection to CSV or JSON.\n"
     "12. Download reels, posts, stories, highlights, and media audio to local files.\n"
-    "13. Ask natural language questions; agent decides tool calls automatically.\n"
-    "14. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
+    "13. Check for remote git updates at startup and update safely with 'update'.\n"
+    "14. Ask natural language questions; agent decides tool calls automatically.\n"
+    "15. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
   )
 
 
@@ -2547,7 +2624,7 @@ def _run_agent_turn(
     print(f"\nError: {exc}\n")
 
 
-def run_repl(settings: Settings) -> int:
+def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None) -> int:
   state = SessionState(
     current_model=settings.openrouter_chat_model,
     render_mode=_default_render_mode(),
@@ -2555,7 +2632,7 @@ def run_repl(settings: Settings) -> int:
   hiker = HikerApiClient(settings)
   agent = OpenRouterAgent(settings)
 
-  _print_banner(settings, state)
+  _print_banner(settings, state, update_status)
 
   while True:
     try:
@@ -2590,6 +2667,25 @@ def run_repl(settings: Settings) -> int:
         continue
       state.current_model = candidate
       print(f"Model set to: {state.current_model}\n")
+      continue
+
+    if raw == "update":
+      ok, message, refreshed_status = fast_forward_update(Path(__file__).resolve().parent.parent)
+      update_status = refreshed_status
+      if not refreshed_status.available:
+        print(f"Git update check is unavailable: {refreshed_status.check_error or 'unknown error'}\n")
+        continue
+      if not ok:
+        print(f"Update failed: {message}\n")
+        continue
+      print(f"{message}\n")
+      if refreshed_status.has_updates:
+        print(
+          f"Still behind {refreshed_status.behind} commit(s) on {refreshed_status.upstream}. "
+          "Resolve manually.\n"
+        )
+      else:
+        print("Repository is up to date. Restart the CLI if package files changed.\n")
       continue
 
     if raw == "render":
