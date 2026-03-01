@@ -10,8 +10,9 @@ python3 -m venv "$VENV_DIR"
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$VENV_DIR/bin/instagram" "$HOME/.local/bin/instagram"
+ln -sf "$VENV_DIR/bin/instagram-mcp" "$HOME/.local/bin/instagram-mcp"
 
 echo "Installed instagram CLI."
 echo "Command path: $HOME/.local/bin/instagram"
+echo "MCP path: $HOME/.local/bin/instagram-mcp"
 echo "Now run: instagram"
-

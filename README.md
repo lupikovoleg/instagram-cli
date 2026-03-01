@@ -62,6 +62,10 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
 - Agent mode:
   - model selects tools via tool calling
   - stats are fetched from APIs (not guessed)
+- MCP server mode:
+  - expose the same Instagram capabilities to Claude or any other MCP client
+  - local `stdio` transport for Claude Code and similar clients
+  - `result_id` support for follow-up `read_result` / `export_result`
 - Output modes:
   - `rich` Markdown render in interactive terminal
   - `plain` text mode
@@ -86,6 +90,12 @@ After install, run:
 
 ```bash
 instagram
+```
+
+To run the MCP server:
+
+```bash
+instagram-mcp
 ```
 
 ## First Run Setup
@@ -175,6 +185,106 @@ instagram> download these stories
 - `reload` — reload `.env`
 - `exit` / `quit` — exit
 
+## MCP Server
+
+This project also ships a local MCP server:
+
+- command: `instagram-mcp`
+- transport: `stdio`
+- runtime: uses the same local `.env` as the CLI
+
+Core MCP tools:
+
+- `search_instagram`
+- `get_profile_stats`
+- `get_reel_stats`
+- `get_recent_reels`
+- `get_profile_reels`
+- `get_followers_page`
+- `get_top_followers`
+- `get_media_comments`
+- `get_profile_stories`
+- `get_profile_highlights`
+- `get_media_likers`
+- `rank_media_likers_by_followers`
+- `get_last_reel_metric`
+- `download_media_content`
+- `download_media_audio`
+- `download_profile_stories`
+- `download_profile_highlights`
+- `read_result`
+- `export_result`
+- `list_results`
+- `server_info`
+
+Notes:
+
+- MCP v1 is stateless for targets: pass explicit usernames or media URLs to tools.
+- Most data tools return a `result_id`.
+- Use `read_result(result_id)` or `export_result(result_id, format)` for follow-up operations.
+
+### Claude Code Setup
+
+Per Anthropic MCP docs, local stdio servers can be added like this:
+
+```bash
+claude mcp add instagram-cli -- /path/to/instagram-cli/.venv/bin/instagram-mcp
+```
+
+If you installed the script into your `PATH`, this also works:
+
+```bash
+claude mcp add instagram-cli -- instagram-mcp
+```
+
+Then verify:
+
+```bash
+claude mcp list
+claude mcp get instagram-cli
+```
+
+### Claude Desktop Setup
+
+On macOS, Claude Desktop reads MCP server config from:
+
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+Example config:
+
+```json
+{
+  "mcpServers": {
+    "instagram-cli": {
+      "command": "/path/to/instagram-cli/.venv/bin/instagram-mcp",
+      "args": [],
+      "env": {
+        "INSTAGRAM_CLI_ENV_FILE": "/path/to/instagram-cli/.env"
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- use absolute paths
+- point `INSTAGRAM_CLI_ENV_FILE` to the CLI's own `.env`
+- restart Claude Desktop after changing the config file
+
+Example Claude prompts:
+
+```text
+Find today's reels about an attack on Dubai.
+How many followers does @lupikovoleg have?
+Get comments for this reel: https://www.instagram.com/reel/XXXXXXXXXXX/
+Rank likers of this reel by followers.
+Export the previous result to csv.
+Download the audio from this reel: https://www.instagram.com/reel/XXXXXXXXXXX/
+```
+
 ## Environment Variables
 
 Required:
@@ -218,6 +328,7 @@ Optional:
   - `get_last_reel_metric`
   - `export_session_data`
   - `get_session_context`
+- MCP server runs on the same capability layer through `instagram_cli.ops.InstagramOps`.
 - Search flow is hybrid:
   - the agent/tool normalizes the user topic
   - builds original + English + short keyword variants

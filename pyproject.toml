@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Interactive Instagram stats and analysis CLI powered by HikerAPI and OpenRouter."
 requires-python = ">=3.10"
 dependencies = [
+  "mcp[cli]>=1,<2",
   "openai>=1.40.0",
   "python-dotenv>=1.0.1",
   "requests>=2.31.0",
@@ -16,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 instagram = "instagram_cli.main:main"
+instagram-mcp = "instagram_cli.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
