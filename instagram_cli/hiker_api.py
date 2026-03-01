@@ -103,10 +103,6 @@ def _calculate_virality(views: int, likes: int, comments: int, saves: int) -> di
 
 def _normalize_reel_payload(media: dict[str, Any], *, reel_url: str | None = None) -> dict[str, Any]:
   product_type = _as_str(media.get("product_type"))
-  reshare_count = None
-  if "reshare_count" in media and media.get("reshare_count") is not None:
-    reshare_count = _as_int(media.get("reshare_count"))
-  is_trial_mode = product_type == "clips" and "reshare_count" not in media
 
   views = _as_int(
     media.get("play_count")
@@ -157,9 +153,6 @@ def _normalize_reel_payload(media: dict[str, Any], *, reel_url: str | None = Non
     "published_at_utc": published_at_utc,
     "published_at_local": published_at_local,
     "taken_at_ts": int(timestamp) if timestamp is not None else None,
-    "reshare_count": reshare_count,
-    "is_trial_mode": is_trial_mode,
-    "trial_reason": "missing_reshare_count" if is_trial_mode else None,
     "views": views,
     "likes": likes,
     "comments": comments,
@@ -845,7 +838,6 @@ class HikerApiClient:
     *,
     limit: int = 12,
     days_back: int | None = None,
-    mode: str = "all",
     max_pages: int = 3,
     page_size: int = 12,
   ) -> dict[str, Any]:
@@ -858,9 +850,6 @@ class HikerApiClient:
     requested_limit = max(1, min(limit, 20))
     requested_page_size = max(1, min(page_size, 24))
     requested_max_pages = max(1, min(max_pages, 5))
-    requested_mode = mode.strip().lower() or "all"
-    if requested_mode not in {"all", "trial", "main"}:
-      raise HikerApiError("Reel mode must be one of: all, trial, main.")
 
     cutoff_ts: int | None = None
     if days_back is not None:
@@ -915,12 +904,6 @@ class HikerApiClient:
           stop_for_cutoff = True
           continue
 
-        is_trial_mode = bool(normalized.get("is_trial_mode"))
-        if requested_mode == "trial" and not is_trial_mode:
-          continue
-        if requested_mode == "main" and is_trial_mode:
-          continue
-
         reels.append(normalized)
         if len(reels) >= requested_limit:
           break
@@ -943,7 +926,6 @@ class HikerApiClient:
       "filters": {
         "limit": requested_limit,
         "days_back": requested_days_back,
-        "mode": requested_mode,
       },
       "pages_used": pages_used,
       "scanned_reels": scanned_count,
@@ -952,7 +934,7 @@ class HikerApiClient:
     }
 
   def recent_reels(self, target: str, limit: int = 12) -> dict[str, Any]:
-    return self.profile_reels(target, limit=limit, mode="all", max_pages=2)
+    return self.profile_reels(target, limit=limit, max_pages=2)
 
   def top_media_likers_by_followers(
     self,

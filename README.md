@@ -9,7 +9,6 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
   - `engagement_rate`
   - publish time (`local` + `UTC`)
   - `viral_index`
-  - trial/main reel signal when available
 - Fetch profile stats by URL or username:
   - followers, following, post count
   - `verified` / `private`
@@ -17,7 +16,6 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
 - Fetch filtered profile reels:
   - latest reels
   - reels from the last `N` days
-  - trial-only or main-only reels
 - List ephemeral/profile collections:
   - active stories
   - highlight folders
@@ -44,7 +42,7 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
   - `does @username have stories?`
   - `how many likes does the latest reel have?`
   - `who are the top followers of @username?`
-  - `show the last 5 trial reels from this profile from the last week`
+  - `show the last 5 reels from this profile from the last week`
   - `export that to csv`
   - paste a profile or reel URL directly
 - Session memory:
@@ -108,10 +106,11 @@ Example prompts:
 ```text
 instagram> profile lupikovoleg
 instagram> search portugal creators
+instagram> open 1
 instagram> followers lupikovoleg 20
 instagram> top-followers lupikovoleg 25 10
 instagram> reel https://www.instagram.com/reel/XXXXXXXXXXX/
-instagram> reels lupikovoleg 5 7 trial
+instagram> reels lupikovoleg 5 7
 instagram> stories lupikovoleg
 instagram> highlights lupikovoleg
 instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 20
@@ -120,12 +119,12 @@ instagram> download media https://www.instagram.com/reel/XXXXXXXXXXX/
 instagram> download audio https://www.instagram.com/reel/XXXXXXXXXXX/
 instagram> download stories lupikovoleg
 instagram> download highlights lupikovoleg
-instagram> export csv latest-trial-reels
+instagram> export csv latest-reels
 instagram> how many followers does lupikovoleg have?
 instagram> does @lupikovoleg have stories?
 instagram> how many likes does the latest reel have?
 instagram> who are the top followers of @lupikovoleg?
-instagram> show the last 5 trial reels from this profile from the last week
+instagram> show the last 5 reels from this profile from the last week
 instagram> show this profile's stories
 instagram> show this profile's highlights
 instagram> export that to csv
@@ -141,8 +140,9 @@ instagram> download these stories
 - `actions` — show available actions
 - `reel <instagram_reel_url>` — fetch reel stats
 - `search <query>` — discover profiles/media by keyword
+- `open [url|@username|index|profile|reel]` — open a URL in the default browser
 - `profile <instagram_profile_url_or_username>` — fetch profile stats
-- `reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]` — fetch filtered reels
+- `reels <instagram_profile_url_or_username> [limit] [days_back]` — fetch filtered reels
 - `stories [instagram_profile_url_or_username] [limit]` — list active stories
 - `highlights [instagram_profile_url_or_username] [limit]` — list highlight folders
 - `comments <instagram_media_url> [limit]` — fetch media comments
@@ -209,21 +209,13 @@ Optional:
   - `get_session_context`
 - For simple direct input (single URL or username), CLI can call stats endpoints directly.
 
-## Trial Reel Detection
-
-- Trial-vs-main detection uses `/v1/user/clips/chunk`.
-- The current heuristic is:
-  - `trial`: `product_type == "clips"` and `reshare_count` is missing
-  - `main`: reel payload includes `reshare_count`
-- This is based on the current HikerAPI documentation and payload behavior.
-
 ## Natural-Language Patterns
 
 The agent is configured to handle follow-up context such as:
 
 - `search portugal creators`
-- `show the last 5 trial reels from this profile from the last week`
-- `what about the main reels?`
+- `open 1`
+- `show the last 5 reels from this profile from the last week`
 - `show this profile's stories`
 - `show this profile's highlights`
 - `export that to csv`

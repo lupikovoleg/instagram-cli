@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import csv
 import re
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -124,7 +126,7 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
     "function": {
       "name": "get_profile_reels",
       "description": (
-        "Get reels for a profile with optional date and trial-mode filters. "
+        "Get reels for a profile with an optional date filter. "
         "If target is omitted, use the current profile from session context."
       ),
       "parameters": {
@@ -145,11 +147,6 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
             "description": "Only include reels published in the last N days (1..30)",
             "minimum": 1,
             "maximum": 30,
-          },
-          "mode": {
-            "type": "string",
-            "enum": ["all", "trial", "main"],
-            "description": "Return all reels, only trial reels, or only main reels",
           },
         },
         "additionalProperties": False,
@@ -567,6 +564,15 @@ def _render_mode_label(mode: str) -> str:
   return "plain"
 
 
+def _profile_url(username: str | None) -> str | None:
+  if not username:
+    return None
+  candidate = username.strip().lstrip("@")
+  if not candidate:
+    return None
+  return f"https://www.instagram.com/{candidate}/"
+
+
 def _print_banner(settings: Settings, state: SessionState) -> None:
   print(_ASCII_ART.rstrip())
   print("Type 'help' for commands. Type 'exit' to quit.\n")
@@ -591,8 +597,6 @@ def _print_reel_stats(data: dict[str, Any]) -> None:
   print(f"shortcode: {data.get('shortcode')}")
   if data.get("product_type"):
     print(f"product type: {data.get('product_type')}")
-  if data.get("product_type") == "clips":
-    print(f"reel mode: {'trial' if data.get('is_trial_mode') else 'main'}")
   print(f"published (local): {data.get('published_at_local') or 'unknown'}")
   print(f"published (utc): {data.get('published_at_utc') or 'unknown'}")
   print(f"views: {data.get('views', 0)}")
@@ -720,7 +724,6 @@ def _print_profile_reels(data: dict[str, Any]) -> None:
   filters = data.get("filters") if isinstance(data.get("filters"), dict) else {}
   print(
     "filters: "
-    f"mode={filters.get('mode', 'all')}, "
     f"days_back={filters.get('days_back') or 'any'}, "
     f"limit={filters.get('limit') or 0}"
   )
@@ -731,10 +734,9 @@ def _print_profile_reels(data: dict[str, Any]) -> None:
     if not isinstance(item, dict):
       continue
     username = item.get("username") or data.get("username") or "unknown"
-    label = "trial" if item.get("is_trial_mode") else "main"
     print(
       f"{index}. @{username} {item.get('url') or ''}\n"
-      f"   {label} | {item.get('published_at_local') or 'unknown'} | "
+      f"   {item.get('published_at_local') or 'unknown'} | "
       f"views={item.get('views', 0)} likes={item.get('likes', 0)} comments={item.get('comments', 0)}"
     )
   print("")
@@ -869,9 +871,10 @@ def _print_help() -> None:
     "- help: show this help\n"
     "- actions: show available actions\n"
     "- search <query>: discover profiles/media by keyword\n"
+    "- open [url|@username|index|profile|reel]: open a result in the default browser\n"
     "- reel <instagram_reel_url>: fetch reel stats\n"
     "- profile <instagram_profile_url_or_username>: fetch profile stats\n"
-    "- reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]: fetch filtered reels\n"
+    "- reels <instagram_profile_url_or_username> [limit] [days_back]: fetch filtered reels\n"
     "- stories [instagram_profile_url_or_username] [limit]: list active stories\n"
     "- highlights [instagram_profile_url_or_username] [limit]: list highlight folders\n"
     "- comments <instagram_media_url> [limit]: fetch media comments\n"
@@ -895,12 +898,14 @@ def _print_help() -> None:
     "\nNatural language works via tool calling (examples):\n"
     "- how many followers does lupikovoleg have?\n"
     "- search portugal creators\n"
+    "- open 1\n"
+    "- open profile\n"
     "- does @username have stories?\n"
     "- paste a profile or reel link\n"
     "- how many likes does the latest reel have?\n"
     "- show this profile's stories\n"
     "- show this profile's highlights\n"
-    "- show the last 5 trial reels from this profile from the last week\n"
+    "- show the last 5 reels from this profile from the last week\n"
     "- export that to csv\n"
     "- download this reel\n"
     "- download audio from this reel\n"
@@ -915,17 +920,18 @@ def _print_actions() -> None:
     "\nAvailable actions now:\n"
     "1. Get Reel metrics by URL: views, likes, comments, saves, engagement, publish time.\n"
     "2. Search Instagram by keyword to discover profiles and media candidates.\n"
-    "3. Get Profile metrics by URL/@username: followers, following, posts, verified/private, stories.\n"
-    "4. Fetch filtered profile reels, including trial-mode detection from chunk payloads.\n"
-    "5. Fetch media comments and media likers.\n"
-    "6. List active stories and highlight folders for a profile.\n"
-    "7. Fetch follower pages with low API cost.\n"
-    "8. Estimate top followers from a bounded sampled subset to control API spend.\n"
-    "9. Rank likers by follower count when explicitly requested.\n"
-    "10. Export the current collection to CSV or JSON.\n"
-    "11. Download reels, posts, stories, highlights, and media audio to local files.\n"
-    "12. Ask natural language questions; agent decides tool calls automatically.\n"
-    "13. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
+    "3. Open a found profile/media URL in the default browser from a URL, username, or list index.\n"
+    "4. Get Profile metrics by URL/@username: followers, following, posts, verified/private, stories.\n"
+    "5. Fetch filtered profile reels by recency.\n"
+    "6. Fetch media comments and media likers.\n"
+    "7. List active stories and highlight folders for a profile.\n"
+    "8. Fetch follower pages with low API cost.\n"
+    "9. Estimate top followers from a bounded sampled subset to control API spend.\n"
+    "10. Rank likers by follower count when explicitly requested.\n"
+    "11. Export the current collection to CSV or JSON.\n"
+    "12. Download reels, posts, stories, highlights, and media audio to local files.\n"
+    "13. Ask natural language questions; agent decides tool calls automatically.\n"
+    "14. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
   )
 
 
@@ -1053,6 +1059,112 @@ def _resolve_media_url(media_url: str | None, state: SessionState) -> str | None
     if url and extract_reel_shortcode(url):
       return url
   return None
+
+
+def _openable_items_from_state(state: SessionState) -> list[dict[str, str]]:
+  items: list[dict[str, str]] = []
+
+  search_results = state.current_search_results.get("items") if isinstance(state.current_search_results, dict) else None
+  if isinstance(search_results, list):
+    for item in search_results:
+      if not isinstance(item, dict):
+        continue
+      url = str(item.get("media_url") or "").strip()
+      if not url:
+        url = _profile_url(str(item.get("username") or "").strip()) or ""
+      if not url:
+        continue
+      label = str(item.get("username") or item.get("shortcode") or item.get("id") or url)
+      items.append({"label": label, "url": url})
+
+  profile_reels = state.current_profile_reels.get("reels") if isinstance(state.current_profile_reels, dict) else None
+  if isinstance(profile_reels, list):
+    for item in profile_reels:
+      if not isinstance(item, dict):
+        continue
+      url = str(item.get("url") or "").strip()
+      if not url:
+        continue
+      label = str(item.get("shortcode") or item.get("username") or url)
+      items.append({"label": label, "url": url})
+
+  if state.current_reel and isinstance(state.current_reel, dict):
+    url = str(state.current_reel.get("url") or "").strip()
+    if url:
+      items.append({"label": str(state.current_reel.get("shortcode") or url), "url": url})
+
+  if state.current_media and isinstance(state.current_media, dict):
+    url = str(state.current_media.get("url") or "").strip()
+    if url:
+      items.append({"label": str(state.current_media.get("shortcode") or url), "url": url})
+
+  if state.current_profile and isinstance(state.current_profile, dict):
+    url = _profile_url(str(state.current_profile.get("username") or "").strip())
+    if url:
+      items.append({"label": str(state.current_profile.get("username") or url), "url": url})
+
+  deduped: list[dict[str, str]] = []
+  seen_urls: set[str] = set()
+  for item in items:
+    url = item["url"]
+    if url in seen_urls:
+      continue
+    seen_urls.add(url)
+    deduped.append(item)
+  return deduped
+
+
+def _open_in_browser(url: str) -> tuple[bool, str]:
+  try:
+    if sys.platform == "darwin":
+      subprocess.run(["open", url], check=True)
+    elif sys.platform.startswith("linux"):
+      subprocess.run(["xdg-open", url], check=True)
+    elif sys.platform.startswith("win"):
+      subprocess.run(["cmd", "/c", "start", "", url], check=True)
+    else:
+      return False, f"Unsupported platform: {sys.platform}"
+  except Exception as exc:
+    return False, str(exc)
+  return True, ""
+
+
+def _resolve_open_target(target: str, state: SessionState) -> tuple[str | None, str | None]:
+  candidate = target.strip()
+  if not candidate:
+    url = _resolve_media_url(None, state)
+    if url:
+      return url, None
+    if state.current_profile and isinstance(state.current_profile, dict):
+      return _profile_url(str(state.current_profile.get("username") or "").strip()), None
+    return None, "Nothing to open from current session context."
+
+  if candidate.isdigit():
+    index = int(candidate)
+    items = _openable_items_from_state(state)
+    if index < 1 or index > len(items):
+      return None, f"Open index out of range. Available items: {len(items)}"
+    return items[index - 1]["url"], None
+
+  if extract_reel_shortcode(candidate) or candidate.startswith("http://") or candidate.startswith("https://"):
+    return candidate, None
+
+  keyword = candidate.lower()
+  if keyword in {"current", "this"}:
+    url = _resolve_media_url(None, state)
+    if url:
+      return url, None
+  if keyword == "profile":
+    if state.current_profile and isinstance(state.current_profile, dict):
+      return _profile_url(str(state.current_profile.get("username") or "").strip()), None
+  if keyword in {"reel", "media", "post"}:
+    return _resolve_media_url(None, state), None
+
+  username = extract_profile_username(candidate)
+  if username:
+    return _profile_url(username), None
+
+  return None, "Could not resolve what to open. Use a URL, username, or result index."
 
 
 def _export_last_collection(
@@ -1515,7 +1627,6 @@ def _tool_get_profile_reels(
   target: str | None,
   limit: int,
   days_back: int | None,
-  mode: str,
   state: SessionState,
   hiker: HikerApiClient,
 ) -> dict[str, Any]:
@@ -1531,7 +1642,6 @@ def _tool_get_profile_reels(
     chosen_target,
     limit=limit,
     days_back=days_back,
-    mode=mode,
   )
   _update_context_with_stats(state, payload)
   reels = payload.get("reels") if isinstance(payload.get("reels"), list) else []
@@ -1546,7 +1656,7 @@ def _tool_get_profile_reels(
       "pages_used": payload.get("pages_used"),
       "source_endpoint": payload.get("source_endpoint"),
     },
-    filename_hint=f"{payload.get('username') or 'profile'}-{mode}-reels",
+    filename_hint=f"{payload.get('username') or 'profile'}-reels",
   )
   return {
     "ok": True,
@@ -2076,12 +2186,10 @@ def _execute_agent_tool(
           days_back = int(days_back_raw)
         except (TypeError, ValueError):
           days_back = None
-      mode = str(args.get("mode") or "all").strip().lower() or "all"
       return _tool_get_profile_reels(
         target=target_text,
         limit=max(1, min(limit, 20)),
         days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
-        mode=mode if mode in {"all", "trial", "main"} else "all",
         state=state,
         hiker=hiker,
       )
@@ -2518,6 +2626,22 @@ def run_repl(settings: Settings) -> int:
       print("Environment reloaded.\n")
       continue
 
+    if raw == "open" or raw.startswith("open "):
+      target = _command_arg(raw)
+      url, error = _resolve_open_target(target, state)
+      if error:
+        print(f"Error: {error}\n")
+        continue
+      if not url:
+        print("Error: Could not resolve URL to open.\n")
+        continue
+      ok, detail = _open_in_browser(url)
+      if not ok:
+        print(f"Error: {detail}\n")
+        continue
+      print(f"Opened: {url}\n")
+      continue
+
     if raw.startswith("search "):
       query = _command_arg(raw)
       if not query:
@@ -2562,29 +2686,26 @@ def run_repl(settings: Settings) -> int:
     if raw.startswith("reels "):
       parts = raw.split()
       if len(parts) < 2:
-        print("Usage: reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]\n")
+        print("Usage: reels <instagram_profile_url_or_username> [limit] [days_back]\n")
         continue
       target = parts[1]
       try:
         limit = int(parts[2]) if len(parts) >= 3 else 12
       except ValueError:
-        print("Usage: reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]\n")
+        print("Usage: reels <instagram_profile_url_or_username> [limit] [days_back]\n")
         continue
       days_back: int | None = None
-      mode = "all"
       if len(parts) >= 4:
         if parts[3].isdigit():
           days_back = int(parts[3])
-          if len(parts) >= 5:
-            mode = parts[4].lower()
         else:
-          mode = parts[3].lower()
+          print("Usage: reels <instagram_profile_url_or_username> [limit] [days_back]\n")
+          continue
       try:
         payload = hiker.profile_reels(
           target,
           limit=max(1, min(limit, 20)),
           days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
-          mode=mode if mode in {"all", "trial", "main"} else "all",
         )
         _update_context_with_stats(state, payload)
         reels = payload.get("reels") if isinstance(payload.get("reels"), list) else []
@@ -2598,7 +2719,7 @@ def run_repl(settings: Settings) -> int:
             "filters": payload.get("filters"),
             "pages_used": payload.get("pages_used"),
           },
-          filename_hint=f"{payload.get('username') or 'profile'}-{mode}-reels",
+          filename_hint=f"{payload.get('username') or 'profile'}-reels",
         )
         _print_profile_reels(payload)
       except HikerApiError as exc:
