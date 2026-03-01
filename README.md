@@ -18,10 +18,19 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
   - latest reels
   - reels from the last `N` days
   - trial-only or main-only reels
+- List ephemeral/profile collections:
+  - active stories
+  - highlight folders
 - Fetch media audience data:
   - media comments
   - media likers
   - ranked likers by follower count
+- Download content to local files:
+  - reels and posts
+  - media audio tracks when the payload exposes a downloadable audio URL
+  - active stories
+  - highlights
+  - download metadata JSON with saved paths
 - Inspect followers with request-budget controls:
   - fetch one followers page with low API cost
   - estimate `top followers` from a bounded sampled subset
@@ -30,6 +39,7 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
   - `csv`
   - `json`
 - Natural-language queries (no command prefix required):
+  - `search portugal creators`
   - `how many followers does lupikovoleg have?`
   - `does @username have stories?`
   - `how many likes does the latest reel have?`
@@ -97,19 +107,32 @@ Example prompts:
 
 ```text
 instagram> profile lupikovoleg
+instagram> search portugal creators
 instagram> followers lupikovoleg 20
 instagram> top-followers lupikovoleg 25 10
 instagram> reel https://www.instagram.com/reel/XXXXXXXXXXX/
 instagram> reels lupikovoleg 5 7 trial
+instagram> stories lupikovoleg
+instagram> highlights lupikovoleg
 instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 20
 instagram> likers https://www.instagram.com/reel/XXXXXXXXXXX/ 20
+instagram> download media https://www.instagram.com/reel/XXXXXXXXXXX/
+instagram> download audio https://www.instagram.com/reel/XXXXXXXXXXX/
+instagram> download stories lupikovoleg
+instagram> download highlights lupikovoleg
 instagram> export csv latest-trial-reels
 instagram> how many followers does lupikovoleg have?
 instagram> does @lupikovoleg have stories?
 instagram> how many likes does the latest reel have?
 instagram> who are the top followers of @lupikovoleg?
 instagram> show the last 5 trial reels from this profile from the last week
+instagram> show this profile's stories
+instagram> show this profile's highlights
 instagram> export that to csv
+instagram> download this reel
+instagram> download audio from this reel
+instagram> download the latest reel from this profile
+instagram> download these stories
 ```
 
 ## Commands
@@ -117,10 +140,17 @@ instagram> export that to csv
 - `help` — show help
 - `actions` — show available actions
 - `reel <instagram_reel_url>` — fetch reel stats
+- `search <query>` — discover profiles/media by keyword
 - `profile <instagram_profile_url_or_username>` — fetch profile stats
 - `reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]` — fetch filtered reels
+- `stories [instagram_profile_url_or_username] [limit]` — list active stories
+- `highlights [instagram_profile_url_or_username] [limit]` — list highlight folders
 - `comments <instagram_media_url> [limit]` — fetch media comments
 - `likers <instagram_media_url> [limit]` — fetch media likers
+- `download media <instagram_media_url>` — download a reel or post
+- `download audio <instagram_media_url>` — download the audio track from a reel or post
+- `download stories [instagram_profile_url_or_username] [limit]` — download active stories
+- `download highlights [instagram_profile_url_or_username] [title_filter]` — download highlights
 - `followers <instagram_profile_url_or_username> [limit]` — fetch one follower page
 - `top-followers <instagram_profile_url_or_username> [sample_size] [top_n]` — approximate biggest followers
 - `export <csv|json> [filename_hint]` — export the most recent collection in session
@@ -158,13 +188,20 @@ Optional:
 
 - HikerAPI provides raw Instagram stats.
 - OpenRouter agent runs with tool calling:
+  - `search_instagram`
   - `get_profile_stats`
   - `get_reel_stats`
   - `get_recent_reels`
   - `get_profile_reels`
+  - `get_profile_stories`
+  - `get_profile_highlights`
   - `get_followers_page`
   - `get_top_followers`
   - `get_media_comments`
+  - `download_media_content`
+  - `download_media_audio`
+  - `download_profile_stories`
+  - `download_profile_highlights`
   - `get_media_likers`
   - `rank_media_likers_by_followers`
   - `get_last_reel_metric`
@@ -184,19 +221,50 @@ Optional:
 
 The agent is configured to handle follow-up context such as:
 
+- `search portugal creators`
 - `show the last 5 trial reels from this profile from the last week`
 - `what about the main reels?`
+- `show this profile's stories`
+- `show this profile's highlights`
 - `export that to csv`
 - `show comments for this post`
 - `who liked this reel?`
 - `rank those likers by followers`
+- `download this reel`
+- `download audio from this reel`
+- `download the latest reel from this profile`
+- `download these stories`
+- `download highlights for this profile`
 
 When the target is omitted, the CLI uses current session context first:
 
+- current search results
 - current profile
 - current reel / media
 - recent reels
 - last fetched collection
+- last download result
+
+## Downloads
+
+Downloaded files are stored under:
+
+- `/Users/oleglupikov/instagram-cli/output/downloads/`
+
+Each download run creates:
+
+- a timestamped directory
+- the saved media files
+- `metadata.json` with the source plan and file paths
+
+Notes:
+
+- Reels and posts are downloaded from media payload URLs.
+- Audio download uses a direct track URL from the media payload when available.
+- Stories are downloaded from the active stories feed.
+- Highlights are resolved in two steps:
+  - `/v1/user/highlights` for folders
+  - `/v1/highlight/by/id` for highlight items
 
 ## Follower Cost Control
 

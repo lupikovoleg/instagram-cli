@@ -54,6 +54,32 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
   {
     "type": "function",
     "function": {
+      "name": "search_instagram",
+      "description": (
+        "Search Instagram by keyword to discover profiles or media candidates before deeper analysis."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query, keywords, brand, creator name, or topic",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many search results to return (1..20)",
+            "minimum": 1,
+            "maximum": 20,
+          },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_reel_stats",
       "description": "Get Instagram media stats by reel or post URL.",
       "parameters": {
@@ -225,6 +251,155 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
   {
     "type": "function",
     "function": {
+      "name": "get_profile_stories",
+      "description": (
+        "List active stories for a profile. "
+        "If target is omitted, use the current profile from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many stories to return, 0 means all available",
+            "minimum": 0,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_highlights",
+      "description": (
+        "List highlights for a profile. "
+        "If target is omitted, use the current profile from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many highlight folders to return, 0 means all available",
+            "minimum": 0,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "download_media_content",
+      "description": (
+        "Download a reel or post to local files. "
+        "If media_url is omitted, use the current reel or post from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "media_url": {
+            "type": "string",
+            "description": "Optional Instagram reel or post URL",
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "download_media_audio",
+      "description": (
+        "Download the audio track from a reel or post. "
+        "If media_url is omitted, use the current reel or post from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "media_url": {
+            "type": "string",
+            "description": "Optional Instagram reel or post URL",
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "download_profile_stories",
+      "description": (
+        "Download active stories for a profile. "
+        "If target is omitted, use the current profile from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many stories to download, 0 means all available",
+            "minimum": 0,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "download_profile_highlights",
+      "description": (
+        "Download highlights for a profile. "
+        "If target is omitted, use the current profile from session context. "
+        "If title_filter is provided, download only matching highlight folders."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL",
+          },
+          "title_filter": {
+            "type": "string",
+            "description": "Optional case-insensitive substring match for highlight title",
+          },
+          "limit_highlights": {
+            "type": "integer",
+            "description": "How many highlight folders to inspect, 0 means all available",
+            "minimum": 0,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_media_likers",
       "description": (
         "Get users who liked an Instagram reel or post URL. "
@@ -355,14 +530,18 @@ class SessionState:
   current_profile: dict[str, Any] | None = None
   current_media: dict[str, Any] | None = None
   current_reel: dict[str, Any] | None = None
+  current_search_results: dict[str, Any] | None = None
   recent_reels: list[dict[str, Any]] | None = None
   current_profile_reels: dict[str, Any] | None = None
   current_followers_page: dict[str, Any] | None = None
   current_top_followers: dict[str, Any] | None = None
+  current_stories: dict[str, Any] | None = None
+  current_highlights: dict[str, Any] | None = None
   current_media_comments: dict[str, Any] | None = None
   current_media_likers: dict[str, Any] | None = None
   last_collection: dict[str, Any] | None = None
   last_export: dict[str, Any] | None = None
+  last_download: dict[str, Any] | None = None
   chat_history: list[dict[str, str]] = field(default_factory=list)
 
 
@@ -425,6 +604,32 @@ def _print_reel_stats(data: dict[str, Any]) -> None:
   caption = data.get("caption")
   if caption:
     print(f"caption: {caption[:200]}")
+  print("")
+
+
+def _print_search_results(data: dict[str, Any]) -> None:
+  print("\n[Search results]")
+  print(f"query: {data.get('query')}")
+  print(f"returned: {data.get('count', 0)} / {data.get('available_count', 0)}")
+  print(f"more available: {data.get('more_available')}")
+  items = data.get("items") if isinstance(data.get("items"), list) else []
+  for index, item in enumerate(items, start=1):
+    if not isinstance(item, dict):
+      continue
+    if item.get("result_type") == "profile":
+      print(
+        f"{index}. profile @{item.get('username') or 'unknown'}"
+        f"{' verified' if item.get('is_verified') else ''}"
+        f"{' private' if item.get('is_private') else ''}"
+      )
+      if item.get("full_name"):
+        print(f"   {item.get('full_name')}")
+    else:
+      print(f"{index}. media {item.get('media_url') or item.get('shortcode') or item.get('id')}")
+      if item.get("username"):
+        print(f"   by @{item.get('username')}")
+      if item.get("caption"):
+        print(f"   {str(item.get('caption'))[:120]}")
   print("")
 
 
@@ -555,6 +760,38 @@ def _print_media_comments(data: dict[str, Any]) -> None:
   print("")
 
 
+def _print_profile_stories(data: dict[str, Any]) -> None:
+  print("\n[Profile stories]")
+  print(f"target: @{data.get('username')}")
+  print(f"returned: {data.get('count', 0)} / {data.get('available_count', 0)}")
+  stories = data.get("stories") if isinstance(data.get("stories"), list) else []
+  for index, item in enumerate(stories, start=1):
+    if not isinstance(item, dict):
+      continue
+    label = "video" if item.get("is_video") else "image"
+    print(
+      f"{index}. {label} | {item.get('published_at_local') or item.get('published_at_utc') or 'unknown'} | "
+      f"{item.get('code') or item.get('story_id')}"
+    )
+  print("")
+
+
+def _print_profile_highlights(data: dict[str, Any]) -> None:
+  print("\n[Profile highlights]")
+  print(f"target: @{data.get('username')}")
+  print(f"returned: {data.get('count', 0)} / {data.get('available_count', 0)}")
+  highlights = data.get("highlights") if isinstance(data.get("highlights"), list) else []
+  for index, item in enumerate(highlights, start=1):
+    if not isinstance(item, dict):
+      continue
+    print(
+      f"{index}. {item.get('title') or '(untitled)'} | "
+      f"items={item.get('media_count', 0)} | "
+      f"created={item.get('created_at_local') or item.get('created_at_utc') or 'unknown'}"
+    )
+  print("")
+
+
 def _print_media_likers(data: dict[str, Any]) -> None:
   media = data.get("media") if isinstance(data.get("media"), dict) else {}
   print("\n[Media likers]")
@@ -611,16 +848,38 @@ def _print_export_result(data: dict[str, Any]) -> None:
   print("")
 
 
+def _print_download_result(data: dict[str, Any]) -> None:
+  print("\n[Download]")
+  print(f"kind: {data.get('download_kind')}")
+  print(f"target: {data.get('target_label')}")
+  print(f"files: {data.get('file_count')}")
+  print(f"dir: {data.get('output_dir')}")
+  print(f"metadata: {data.get('metadata_path')}")
+  files = data.get("files") if isinstance(data.get("files"), list) else []
+  for item in files[:10]:
+    if not isinstance(item, dict):
+      continue
+    print(f"- {item.get('path')}")
+  print("")
+
+
 def _print_help() -> None:
   print(
     "\nCommands:\n"
     "- help: show this help\n"
     "- actions: show available actions\n"
+    "- search <query>: discover profiles/media by keyword\n"
     "- reel <instagram_reel_url>: fetch reel stats\n"
     "- profile <instagram_profile_url_or_username>: fetch profile stats\n"
     "- reels <instagram_profile_url_or_username> [limit] [days_back] [all|trial|main]: fetch filtered reels\n"
+    "- stories [instagram_profile_url_or_username] [limit]: list active stories\n"
+    "- highlights [instagram_profile_url_or_username] [limit]: list highlight folders\n"
     "- comments <instagram_media_url> [limit]: fetch media comments\n"
     "- likers <instagram_media_url> [limit]: fetch media likers\n"
+    "- download media <instagram_media_url>: download a reel or post\n"
+    "- download audio <instagram_media_url>: download the audio track from a reel or post\n"
+    "- download stories [instagram_profile_url_or_username] [limit]: download active stories\n"
+    "- download highlights [instagram_profile_url_or_username] [title_filter]: download highlights\n"
     "- followers <instagram_profile_url_or_username> [limit]: fetch one follower page\n"
     "- top-followers <instagram_profile_url_or_username> [sample_size] [top_n]: approximate biggest followers\n"
     "- export <csv|json> [filename_hint]: export the most recent collection in session\n"
@@ -635,11 +894,19 @@ def _print_help() -> None:
     "- exit | quit: close CLI\n"
     "\nNatural language works via tool calling (examples):\n"
     "- how many followers does lupikovoleg have?\n"
+    "- search portugal creators\n"
     "- does @username have stories?\n"
     "- paste a profile or reel link\n"
     "- how many likes does the latest reel have?\n"
+    "- show this profile's stories\n"
+    "- show this profile's highlights\n"
     "- show the last 5 trial reels from this profile from the last week\n"
-    "- export that to csv\n",
+    "- export that to csv\n"
+    "- download this reel\n"
+    "- download audio from this reel\n"
+    "- download the latest reel from this profile\n"
+    "- download these stories\n"
+    "- download highlights for this profile\n",
   )
 
 
@@ -647,15 +914,18 @@ def _print_actions() -> None:
   print(
     "\nAvailable actions now:\n"
     "1. Get Reel metrics by URL: views, likes, comments, saves, engagement, publish time.\n"
-    "2. Get Profile metrics by URL/@username: followers, following, posts, verified/private, stories.\n"
-    "3. Fetch filtered profile reels, including trial-mode detection from chunk payloads.\n"
-    "4. Fetch media comments and media likers.\n"
-    "5. Fetch follower pages with low API cost.\n"
-    "6. Estimate top followers from a bounded sampled subset to control API spend.\n"
-    "7. Rank likers by follower count when explicitly requested.\n"
-    "8. Export the current collection to CSV or JSON.\n"
-    "9. Ask natural language questions; agent decides tool calls automatically.\n"
-    "10. Follow-ups use session context (current profile/reel/media/collection).\n",
+    "2. Search Instagram by keyword to discover profiles and media candidates.\n"
+    "3. Get Profile metrics by URL/@username: followers, following, posts, verified/private, stories.\n"
+    "4. Fetch filtered profile reels, including trial-mode detection from chunk payloads.\n"
+    "5. Fetch media comments and media likers.\n"
+    "6. List active stories and highlight folders for a profile.\n"
+    "7. Fetch follower pages with low API cost.\n"
+    "8. Estimate top followers from a bounded sampled subset to control API spend.\n"
+    "9. Rank likers by follower count when explicitly requested.\n"
+    "10. Export the current collection to CSV or JSON.\n"
+    "11. Download reels, posts, stories, highlights, and media audio to local files.\n"
+    "12. Ask natural language questions; agent decides tool calls automatically.\n"
+    "13. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
   )
 
 
@@ -858,6 +1128,77 @@ def _export_last_collection(
   }
 
 
+def _downloads_dir() -> Path:
+  path = _output_dir() / "downloads"
+  path.mkdir(parents=True, exist_ok=True)
+  return path
+
+
+def _download_plan_to_disk(
+  *,
+  plan: dict[str, Any],
+  state: SessionState,
+  hiker: HikerApiClient,
+  folder_hint: str | None = None,
+) -> dict[str, Any]:
+  assets = plan.get("assets") if isinstance(plan.get("assets"), list) else []
+  safe_assets = [item for item in assets if isinstance(item, dict)]
+  timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+  base_hint = folder_hint or str(plan.get("target_label") or plan.get("download_kind") or "download")
+  root_dir = _downloads_dir() / f"{_slugify(base_hint)}_{timestamp}"
+  root_dir.mkdir(parents=True, exist_ok=True)
+
+  files: list[dict[str, Any]] = []
+  for index, asset in enumerate(safe_assets, start=1):
+    asset_url = str(asset.get("asset_url") or "").strip()
+    if not asset_url:
+      continue
+    extension = str(asset.get("extension") or ".bin")
+    if not extension.startswith("."):
+      extension = f".{extension}"
+    highlight_title = str(asset.get("highlight_title") or "").strip()
+    highlight_id = str(asset.get("highlight_id") or "").strip()
+    if highlight_title:
+      subdir_name = _slugify(f"{highlight_title}-{highlight_id}" if highlight_id else highlight_title, default="highlight")
+      subdir = root_dir / subdir_name
+    else:
+      subdir = root_dir
+    code = str(asset.get("code") or asset.get("shortcode") or asset.get("story_id") or index)
+    filename = f"{index:02d}_{_slugify(code, default='asset')}{extension}"
+    destination = subdir / filename
+    hiker.download_file(asset_url, destination)
+    files.append(
+      {
+        "path": str(destination),
+        "asset_kind": asset.get("asset_kind"),
+        "asset_url": asset_url,
+        "code": asset.get("code") or asset.get("shortcode"),
+        "story_id": asset.get("story_id"),
+        "highlight_title": asset.get("highlight_title"),
+      },
+    )
+
+  metadata = {
+    "generated_at": datetime.now().isoformat(timespec="seconds"),
+    "plan": _json_safe_value(_without_raw(plan) if isinstance(plan, dict) else plan),
+    "files": files,
+  }
+  metadata_path = root_dir / "metadata.json"
+  metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+
+  result = {
+    "ok": True,
+    "download_kind": plan.get("download_kind"),
+    "target_label": plan.get("target_label"),
+    "output_dir": str(root_dir),
+    "file_count": len(files),
+    "files": files,
+    "metadata_path": str(metadata_path),
+  }
+  state.last_download = result
+  return result
+
+
 def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> None:
   state.last_metrics = stats
   entity_type = str(stats.get("entity_type") or "")
@@ -873,8 +1214,14 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
       state.current_top_followers = None
       state.current_media = None
       state.current_reel = None
+      state.current_stories = None
+      state.current_highlights = None
       state.current_media_comments = None
       state.current_media_likers = None
+    return
+
+  if entity_type == "search_results":
+    state.current_search_results = stats
     return
 
   if entity_type == "media":
@@ -958,6 +1305,12 @@ def _build_agent_context(state: SessionState) -> dict[str, Any]:
     context["last_metrics"] = _without_raw(state.last_metrics)
   if state.current_profile is not None:
     context["current_profile"] = _without_raw(state.current_profile)
+  if state.current_search_results is not None:
+    search_results = _without_raw(state.current_search_results) or {}
+    items = search_results.get("items")
+    if isinstance(items, list):
+      search_results["items"] = [_without_raw(item) for item in items[:10] if isinstance(item, dict)]
+    context["current_search_results"] = search_results
   if state.current_media is not None:
     context["current_media"] = _without_raw(state.current_media)
   if state.current_reel is not None:
@@ -997,11 +1350,30 @@ def _build_agent_context(state: SessionState) -> dict[str, Any]:
     if isinstance(rows, list):
       media_likers["rows"] = [_without_raw(item) for item in rows[:10] if isinstance(item, dict)]
     context["current_media_likers"] = media_likers
+  if state.current_stories is not None:
+    stories_payload = _without_raw(state.current_stories) or {}
+    stories = stories_payload.get("stories")
+    if isinstance(stories, list):
+      stories_payload["stories"] = [_without_raw(item) for item in stories[:10] if isinstance(item, dict)]
+    context["current_stories"] = stories_payload
+  if state.current_highlights is not None:
+    highlights_payload = _without_raw(state.current_highlights) or {}
+    highlights = highlights_payload.get("highlights")
+    if isinstance(highlights, list):
+      highlights_payload["highlights"] = [_without_raw(item) for item in highlights[:10] if isinstance(item, dict)]
+    context["current_highlights"] = highlights_payload
   collection_context = _collection_context(state.last_collection)
   if collection_context is not None:
     context["last_collection"] = collection_context
   if state.last_export is not None:
     context["last_export"] = state.last_export
+  if state.last_download is not None:
+    context["last_download"] = {
+      "download_kind": state.last_download.get("download_kind"),
+      "target_label": state.last_download.get("target_label"),
+      "output_dir": state.last_download.get("output_dir"),
+      "file_count": state.last_download.get("file_count"),
+    }
 
   return context
 
@@ -1051,6 +1423,41 @@ def _tool_get_profile_stats(
   return {
     "ok": True,
     "profile": _without_raw(profile),
+  }
+
+
+def _tool_search_instagram(
+  *,
+  query: str,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.topsearch(query, limit=limit, flat=True)
+  _update_context_with_stats(state, payload)
+  items = payload.get("items") if isinstance(payload.get("items"), list) else []
+  safe_items = [_without_raw(item) for item in items if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="search_results",
+    rows=[item for item in safe_items if isinstance(item, dict)],
+    metadata={
+      "query": payload.get("query"),
+      "available_count": payload.get("available_count"),
+      "more_available": payload.get("more_available"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"search-{query}",
+  )
+  return {
+    "ok": True,
+    "query": payload.get("query"),
+    "count": payload.get("count"),
+    "available_count": payload.get("available_count"),
+    "more_available": payload.get("more_available"),
+    "end_cursor": payload.get("end_cursor"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "items": safe_items,
   }
 
 
@@ -1266,6 +1673,213 @@ def _tool_get_media_comments(
   }
 
 
+def _tool_get_profile_stories(
+  *,
+  target: str | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+  payload = hiker.profile_stories(chosen_target, limit=limit)
+  state.current_stories = payload
+  profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else None
+  if profile:
+    state.current_profile = profile
+  stories = payload.get("stories") if isinstance(payload.get("stories"), list) else []
+  safe_stories = [_without_raw(item) for item in stories if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_stories",
+    rows=[item for item in safe_stories if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "available_count": payload.get("available_count"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-stories",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": payload.get("count"),
+    "available_count": payload.get("available_count"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "profile": _without_raw(profile) if profile else None,
+    "stories": safe_stories,
+  }
+
+
+def _tool_get_profile_highlights(
+  *,
+  target: str | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+  payload = hiker.profile_highlights(chosen_target, limit=limit)
+  state.current_highlights = payload
+  profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else None
+  if profile:
+    state.current_profile = profile
+  highlights = payload.get("highlights") if isinstance(payload.get("highlights"), list) else []
+  safe_highlights = [_without_raw(item) for item in highlights if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_highlights",
+    rows=[item for item in safe_highlights if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "available_count": payload.get("available_count"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-highlights",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": payload.get("count"),
+    "available_count": payload.get("available_count"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "profile": _without_raw(profile) if profile else None,
+    "highlights": safe_highlights,
+  }
+
+
+def _tool_download_media_content(
+  *,
+  media_url: str | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_media_url = _resolve_media_url(media_url, state)
+  if not chosen_media_url:
+    return {
+      "ok": False,
+      "error": "media_not_found_in_session",
+      "message": "Provide a reel/post URL or load a reel/post first.",
+    }
+  plan = hiker.download_media_plan(chosen_media_url)
+  media = plan.get("media") if isinstance(plan.get("media"), dict) else None
+  if media:
+    state.current_media = media
+  return _download_plan_to_disk(plan=plan, state=state, hiker=hiker, folder_hint=str((media or {}).get("shortcode") or "media"))
+
+
+def _tool_download_media_audio(
+  *,
+  media_url: str | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_media_url = _resolve_media_url(media_url, state)
+  if not chosen_media_url:
+    return {
+      "ok": False,
+      "error": "media_not_found_in_session",
+      "message": "Provide a reel/post URL or load a reel/post first.",
+    }
+  plan = hiker.download_media_audio_plan(chosen_media_url)
+  media = plan.get("media") if isinstance(plan.get("media"), dict) else None
+  if media:
+    state.current_media = media
+  audio_track = plan.get("audio_track") if isinstance(plan.get("audio_track"), dict) else {}
+  folder_hint = str(audio_track.get("title") or (media or {}).get("shortcode") or "media-audio")
+  return _download_plan_to_disk(plan=plan, state=state, hiker=hiker, folder_hint=folder_hint)
+
+
+def _tool_download_profile_stories(
+  *,
+  target: str | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+  payload = hiker.profile_stories(chosen_target, limit=limit)
+  state.current_stories = payload
+  profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else None
+  if profile:
+    state.current_profile = profile
+  stories = payload.get("stories") if isinstance(payload.get("stories"), list) else []
+  _set_last_collection(
+    state,
+    name="profile_stories",
+    rows=[_without_raw(item) for item in stories if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "available_count": payload.get("available_count"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-stories",
+  )
+  plan = hiker.download_stories_plan(chosen_target, limit=limit)
+  return _download_plan_to_disk(plan=plan, state=state, hiker=hiker, folder_hint=f"{payload.get('username') or 'profile'}-stories")
+
+
+def _tool_download_profile_highlights(
+  *,
+  target: str | None,
+  title_filter: str | None,
+  limit_highlights: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+  payload = hiker.profile_highlights(chosen_target, limit=limit_highlights)
+  state.current_highlights = payload
+  profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else None
+  if profile:
+    state.current_profile = profile
+  highlights = payload.get("highlights") if isinstance(payload.get("highlights"), list) else []
+  _set_last_collection(
+    state,
+    name="profile_highlights",
+    rows=[_without_raw(item) for item in highlights if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "available_count": payload.get("available_count"),
+      "title_filter": title_filter,
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-highlights",
+  )
+  plan = hiker.download_highlights_plan(
+    chosen_target,
+    title_filter=title_filter,
+    limit_highlights=limit_highlights,
+  )
+  return _download_plan_to_disk(
+    plan=plan,
+    state=state,
+    hiker=hiker,
+    folder_hint=f"{payload.get('username') or 'profile'}-highlights",
+  )
+
+
 def _tool_get_media_likers(
   *,
   media_url: str | None,
@@ -1408,6 +2022,21 @@ def _execute_agent_tool(
         "context": _build_agent_context(state),
       }
 
+    if tool_name == "search_instagram":
+      query = str(args.get("query") or "").strip()
+      if not query:
+        return {"ok": False, "error": "missing_query"}
+      try:
+        limit = int(args.get("limit", 10))
+      except (TypeError, ValueError):
+        limit = 10
+      return _tool_search_instagram(
+        query=query,
+        limit=max(1, min(limit, 20)),
+        state=state,
+        hiker=hiker,
+      )
+
     if tool_name == "get_profile_stats":
       target = str(args.get("target") or "").strip()
       if not target:
@@ -1512,6 +2141,83 @@ def _execute_agent_tool(
       return _tool_get_media_comments(
         media_url=media_url_text,
         limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_stories":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 0))
+      except (TypeError, ValueError):
+        limit = 0
+      return _tool_get_profile_stories(
+        target=target_text,
+        limit=max(0, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_highlights":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 0))
+      except (TypeError, ValueError):
+        limit = 0
+      return _tool_get_profile_highlights(
+        target=target_text,
+        limit=max(0, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "download_media_content":
+      media_url = args.get("media_url")
+      media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
+      return _tool_download_media_content(
+        media_url=media_url_text,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "download_media_audio":
+      media_url = args.get("media_url")
+      media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
+      return _tool_download_media_audio(
+        media_url=media_url_text,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "download_profile_stories":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 0))
+      except (TypeError, ValueError):
+        limit = 0
+      return _tool_download_profile_stories(
+        target=target_text,
+        limit=max(0, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "download_profile_highlights":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      title_filter = args.get("title_filter")
+      title_filter_text = str(title_filter).strip() if isinstance(title_filter, str) and title_filter.strip() else None
+      try:
+        limit_highlights = int(args.get("limit_highlights", 0))
+      except (TypeError, ValueError):
+        limit_highlights = 0
+      return _tool_download_profile_highlights(
+        target=target_text,
+        title_filter=title_filter_text,
+        limit_highlights=max(0, min(limit_highlights, 50)),
         state=state,
         hiker=hiker,
       )
@@ -1812,6 +2518,21 @@ def run_repl(settings: Settings) -> int:
       print("Environment reloaded.\n")
       continue
 
+    if raw.startswith("search "):
+      query = _command_arg(raw)
+      if not query:
+        print("Usage: search <query>\n")
+        continue
+      try:
+        result = _tool_search_instagram(query=query, limit=10, state=state, hiker=hiker)
+        if not result.get("ok"):
+          print(f"Error: {result.get('error')}\n")
+          continue
+        _print_search_results(result)
+      except HikerApiError as exc:
+        print(f"Error: {exc}\n")
+      continue
+
     if raw.startswith("reel "):
       target = _command_arg(raw)
       if not target:
@@ -1884,6 +2605,48 @@ def run_repl(settings: Settings) -> int:
         print(f"Error: {exc}\n")
       continue
 
+    if raw.startswith("stories"):
+      parts = raw.split()
+      target = parts[1] if len(parts) >= 2 and not parts[1].isdigit() else None
+      limit_text = parts[2] if target and len(parts) >= 3 else (parts[1] if len(parts) >= 2 and parts[1].isdigit() else None)
+      try:
+        limit = int(limit_text) if limit_text is not None else 0
+      except ValueError:
+        print("Usage: stories [instagram_profile_url_or_username] [limit]\n")
+        continue
+      result = _tool_get_profile_stories(
+        target=target,
+        limit=max(0, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+      if not result.get("ok"):
+        print(f"Error: {result.get('message') or result.get('error')}\n")
+        continue
+      _print_profile_stories(result)
+      continue
+
+    if raw.startswith("highlights"):
+      parts = raw.split()
+      target = parts[1] if len(parts) >= 2 and not parts[1].isdigit() else None
+      limit_text = parts[2] if target and len(parts) >= 3 else (parts[1] if len(parts) >= 2 and parts[1].isdigit() else None)
+      try:
+        limit = int(limit_text) if limit_text is not None else 0
+      except ValueError:
+        print("Usage: highlights [instagram_profile_url_or_username] [limit]\n")
+        continue
+      result = _tool_get_profile_highlights(
+        target=target,
+        limit=max(0, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+      if not result.get("ok"):
+        print(f"Error: {result.get('message') or result.get('error')}\n")
+        continue
+      _print_profile_highlights(result)
+      continue
+
     if raw.startswith("comments "):
       parts = raw.split(maxsplit=2)
       if len(parts) < 2:
@@ -1950,6 +2713,96 @@ def run_repl(settings: Settings) -> int:
         )
       except HikerApiError as exc:
         print(f"Error: {exc}\n")
+      continue
+
+    if raw.startswith("download "):
+      parts = raw.split()
+      if len(parts) < 2:
+        print("Usage: download <media|stories|highlights> ...\n")
+        continue
+      subtype = parts[1].lower()
+
+      if subtype in {"media", "reel", "post"}:
+        if len(parts) < 3:
+          target_url = _resolve_media_url(None, state)
+          if not target_url:
+            print("Usage: download media <instagram_media_url>\n")
+            continue
+        else:
+          target_url = parts[2]
+        try:
+          result = _tool_download_media_content(media_url=target_url, state=state, hiker=hiker)
+          if not result.get("ok"):
+            print(f"Error: {result.get('message') or result.get('error')}\n")
+            continue
+          _print_download_result(result)
+        except HikerApiError as exc:
+          print(f"Error: {exc}\n")
+        continue
+
+      if subtype == "audio":
+        if len(parts) < 3:
+          target_url = _resolve_media_url(None, state)
+          if not target_url:
+            print("Usage: download audio <instagram_media_url>\n")
+            continue
+        else:
+          target_url = parts[2]
+        try:
+          result = _tool_download_media_audio(media_url=target_url, state=state, hiker=hiker)
+          if not result.get("ok"):
+            print(f"Error: {result.get('message') or result.get('error')}\n")
+            continue
+          _print_download_result(result)
+        except HikerApiError as exc:
+          print(f"Error: {exc}\n")
+        continue
+
+      if subtype == "stories":
+        target = parts[2] if len(parts) >= 3 and not parts[2].isdigit() else None
+        limit_text = parts[3] if target and len(parts) >= 4 else (parts[2] if len(parts) >= 3 and parts[2].isdigit() else None)
+        try:
+          limit = int(limit_text) if limit_text is not None else 0
+        except ValueError:
+          print("Usage: download stories [instagram_profile_url_or_username] [limit]\n")
+          continue
+        try:
+          result = _tool_download_profile_stories(
+            target=target,
+            limit=max(0, min(limit, 50)),
+            state=state,
+            hiker=hiker,
+          )
+          if not result.get("ok"):
+            print(f"Error: {result.get('message') or result.get('error')}\n")
+            continue
+          _print_download_result(result)
+        except HikerApiError as exc:
+          print(f"Error: {exc}\n")
+        continue
+
+      if subtype == "highlights":
+        target = parts[2] if len(parts) >= 3 else None
+        title_filter = " ".join(parts[3:]).strip() if len(parts) >= 4 else None
+        if target in {None, ""}:
+          target = _resolve_profile_target(None, state)
+        try:
+          result = _tool_download_profile_highlights(
+            target=target,
+            title_filter=title_filter or None,
+            limit_highlights=0,
+            state=state,
+            hiker=hiker,
+          )
+          if not result.get("ok"):
+            print(f"Error: {result.get('message') or result.get('error')}\n")
+            continue
+          _print_download_result(result)
+        except HikerApiError as exc:
+          print(f"Error: {exc}\n")
+        continue
+
+      print("Usage: download <media|stories|highlights> ...\n")
       continue
 
     if raw.startswith("followers "):
