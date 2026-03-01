@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable
 
 from instagram_cli.config import Settings
@@ -53,6 +54,10 @@ class OpenRouterAgent:
       "Avoid Markdown tables for search/list outputs that contain links; use numbered lists with the full URL instead. "
       "For any question that asks for concrete Instagram stats, always call tools first. "
       "Use search_instagram only for discovery when the user gives a vague keyword/topic/brand query rather than an exact profile URL, username, or media URL. "
+      "When the user asks to find reels/posts on a topic, call search_instagram with media_only=true. "
+      "When the user asks for today's content, call search_instagram with today_only=true. "
+      "When the user asks for fresh/recent/latest content, set days_back to a reasonable window such as 7 unless they specify another range. "
+      "search_instagram already expands queries across languages and keyword variants, so pass the user's topic cleanly instead of manually listing variants in your answer. "
       "If the user gives profile URL/username, use get_profile_stats, get_recent_reels, or get_profile_reels. "
       "If the user gives reel or post URL, use get_reel_stats, get_media_comments, or get_media_likers as needed. "
       "If the user asks to list stories, use get_profile_stories. "
@@ -95,6 +100,150 @@ class OpenRouterAgent:
           parts.append(part["text"])
       return "".join(parts)
     return ""
+
+  @staticmethod
+  def _dedupe_queries(values: list[str]) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+      text = re.sub(r"\s+", " ", value).strip(" \t\r\n,;")
+      if not text:
+        continue
+      key = text.casefold()
+      if key in seen:
+        continue
+      seen.add(key)
+      items.append(text)
+    return items
+
+  @staticmethod
+  def _strip_json_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+      cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+      cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+  @staticmethod
+  def _extract_json_object(text: str) -> dict[str, Any] | None:
+    cleaned = OpenRouterAgent._strip_json_fences(text)
+    try:
+      payload = json.loads(cleaned)
+      return payload if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+      pass
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+      return None
+    try:
+      payload = json.loads(cleaned[start:end + 1])
+    except json.JSONDecodeError:
+      return None
+    return payload if isinstance(payload, dict) else None
+
+  @staticmethod
+  def _fallback_search_plan(query: str) -> dict[str, Any]:
+    original = re.sub(r"\s+", " ", query).strip()
+    normalized_topic = re.sub(
+      r"(?iu)\b(find|search|show|look for|найди|найти|поищи|покажи|свежие|свежий|today|todays|today's|сегодня|сегодняшние|за|last|latest|recent|reels|reel|рилсы|рилс|posts|post|посты|пост|about|про)\b",
+      " ",
+      original,
+    )
+    normalized_topic = re.sub(r"\s+", " ", normalized_topic).strip(" \t\r\n,.;:-")
+    queries = OpenRouterAgent._dedupe_queries([original, normalized_topic or original])
+    return {
+      "original_query": original,
+      "normalized_topic": normalized_topic or original,
+      "english_translation": None,
+      "queries": queries[:5],
+      "source": "fallback",
+    }
+
+  def expand_search_query(
+    self,
+    *,
+    query: str,
+    media_only: bool = False,
+    today_only: bool = False,
+    days_back: int | None = None,
+    model: str | None = None,
+  ) -> dict[str, Any]:
+    fallback = self._fallback_search_plan(query)
+    if self._client is None:
+      return fallback
+
+    client = self._require()
+    chosen_model = model or self._settings.openrouter_chat_model
+    user_prompt = (
+      "Build search queries for Instagram topic discovery.\n"
+      "Return strict JSON only with this schema:\n"
+      "{\"normalized_topic\": string, \"english_translation\": string|null, \"variants\": string[]}\n\n"
+      f"original_query: {fallback['original_query']}\n"
+      f"need_media_only: {'true' if media_only else 'false'}\n"
+      f"need_today_only: {'true' if today_only else 'false'}\n"
+      f"days_back: {days_back if days_back is not None else 'null'}\n\n"
+      "Rules:\n"
+      "- normalized_topic: remove control words like find/search/show/reels/today/last week and keep only the topic.\n"
+      "- english_translation: idiomatic English translation of normalized_topic. If already English, keep it concise.\n"
+      "- variants: 2 to 4 short keyword variants that could plausibly appear in captions, titles, or search results.\n"
+      "- Use multiple languages when useful.\n"
+      "- Keep variants short, specific, and not repetitive.\n"
+      "- Do not include markdown, explanations, hashtags, or surrounding text.\n"
+    )
+
+    try:
+      response = client.chat.completions.create(
+        model=chosen_model,
+        temperature=0,
+        messages=[
+          {
+            "role": "system",
+            "content": (
+              "You build concise multilingual search-query expansions for Instagram discovery. "
+              "Return JSON only."
+            ),
+          },
+          {"role": "user", "content": user_prompt},
+        ],
+      )
+      message = response.choices[0].message
+      payload = self._extract_json_object(self._normalize_content(getattr(message, "content", None)))
+      if not isinstance(payload, dict):
+        return fallback
+    except Exception:
+      return fallback
+
+    normalized_topic = str(payload.get("normalized_topic") or "").strip() or fallback["normalized_topic"]
+    english_translation_raw = payload.get("english_translation")
+    english_translation = None
+    if isinstance(english_translation_raw, str):
+      english_translation = english_translation_raw.strip() or None
+
+    variants_raw = payload.get("variants")
+    variants = [
+      str(item).strip()
+      for item in variants_raw
+      if isinstance(item, str) and str(item).strip()
+    ] if isinstance(variants_raw, list) else []
+
+    queries = self._dedupe_queries(
+      [
+        fallback["original_query"],
+        normalized_topic,
+        english_translation or "",
+        *variants,
+      ],
+    )[:5]
+
+    return {
+      "original_query": fallback["original_query"],
+      "normalized_topic": normalized_topic,
+      "english_translation": english_translation,
+      "queries": queries or fallback["queries"],
+      "source": "llm",
+    }
 
   def ask(
     self,

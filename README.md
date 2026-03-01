@@ -149,7 +149,7 @@ instagram> download these stories
 - `help` — show help
 - `actions` — show available actions
 - `reel <instagram_reel_url>` — fetch reel stats
-- `search <query>` — discover profiles/media by keyword
+- `search <query>` — discover profiles/media by topic with multilingual query expansion and optional freshness filtering
 - `open [url|@username|index|profile|reel]` — open a URL in the default browser
 - `profile <instagram_profile_url_or_username>` — fetch profile stats
 - `reels <instagram_profile_url_or_username> [limit] [days_back]` — fetch filtered reels
@@ -218,6 +218,13 @@ Optional:
   - `get_last_reel_metric`
   - `export_session_data`
   - `get_session_context`
+- Search flow is hybrid:
+  - the agent/tool normalizes the user topic
+  - builds original + English + short keyword variants
+  - runs multiple `/gql/topsearch` queries
+  - merges and deduplicates results
+  - keeps only media when the user asks for reels/posts
+  - enriches media timestamps and filters by `today` / `last N days` when freshness matters
 - For simple direct input (single URL or username), CLI can call stats endpoints directly.
 
 ## Repo Updates
@@ -241,6 +248,8 @@ Behavior:
 The agent is configured to handle follow-up context such as:
 
 - `search portugal creators`
+- `find reels about an attack on Dubai`
+- `find today's reels about an attack on Dubai`
 - `open 1`
 - `show the last 5 reels from this profile from the last week`
 - `show this profile's stories`

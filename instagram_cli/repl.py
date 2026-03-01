@@ -7,8 +7,9 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +66,7 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
     "function": {
       "name": "search_instagram",
       "description": (
-        "Search Instagram by keyword to discover profiles or media candidates before deeper analysis."
+        "Search Instagram by topic using multilingual keyword expansion, deduping, and optional media/freshness filters."
       ),
       "parameters": {
         "type": "object",
@@ -79,6 +80,20 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
             "description": "How many search results to return (1..20)",
             "minimum": 1,
             "maximum": 20,
+          },
+          "media_only": {
+            "type": "boolean",
+            "description": "If true, keep only reel/post media results.",
+          },
+          "today_only": {
+            "type": "boolean",
+            "description": "If true, keep only media published today in the local timezone.",
+          },
+          "days_back": {
+            "type": "integer",
+            "description": "If set, keep only media published in the last N days (1..30).",
+            "minimum": 1,
+            "maximum": 30,
           },
         },
         "required": ["query"],
@@ -664,6 +679,192 @@ def _format_pct(value: float) -> str:
   return f"{value * 100:.2f}%"
 
 
+def _search_result_url(item: dict[str, Any]) -> str | None:
+  media_url = str(item.get("media_url") or "").strip()
+  if media_url:
+    return media_url
+  username = str(item.get("username") or "").strip()
+  return _profile_url(username)
+
+
+def _search_result_key(item: dict[str, Any]) -> str:
+  result_type = str(item.get("result_type") or "unknown")
+  shortcode = str(item.get("shortcode") or "").strip().lower()
+  username = str(item.get("username") or "").strip().lower()
+  item_id = str(item.get("id") or "").strip().lower()
+  media_url = str(item.get("media_url") or "").strip().lower()
+  if result_type == "profile":
+    return f"profile:{username or item_id or media_url}"
+  return f"media:{shortcode or media_url or item_id or username}"
+
+
+def _search_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
+  search_hits = int(item.get("search_hits") or 0)
+  best_rank = int(item.get("best_rank") or 9999)
+  media_bias = 0 if item.get("result_type") == "media" else 1
+  return (-search_hits, best_rank, media_bias)
+
+
+def _is_missing_value(value: Any) -> bool:
+  return value is None or value == "" or value == [] or value == {}
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+  if not isinstance(value, str):
+    return None
+  text = value.strip()
+  if not text:
+    return None
+  try:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+  except ValueError:
+    return None
+
+
+def _search_item_datetime(item: dict[str, Any]) -> datetime | None:
+  dt_local = _parse_iso_datetime(item.get("published_at_local"))
+  if dt_local is not None:
+    return dt_local
+  dt_utc = _parse_iso_datetime(item.get("published_at_utc"))
+  if dt_utc is not None:
+    return dt_utc.astimezone()
+  return None
+
+
+def _infer_search_preferences(query: str) -> dict[str, Any]:
+  text = query.casefold()
+  media_only = bool(re.search(r"(?iu)\b(reel|reels|рилс|рилсы|video|videos|видео|ролик|ролики)\b", text))
+  today_only = bool(re.search(r"(?iu)\b(today|todays|today's|сегодня|сегодняшн\w*)\b", text))
+  wants_fresh = bool(re.search(r"(?iu)\b(fresh|recent|latest|new|свеж\w*|последн\w*)\b", text))
+
+  days_back: int | None = None
+  last_days_match = re.search(r"(?iu)\b(?:last|за\s+последн\w*|за)\s+(\d{1,2})\s+(?:day|days|дн\w*)\b", text)
+  if last_days_match:
+    days_back = max(1, min(int(last_days_match.group(1)), 30))
+  elif re.search(r"(?iu)\b(last week|за последн\w* неделю|за неделю)\b", text):
+    days_back = 7
+
+  if wants_fresh and days_back is None and not today_only:
+    days_back = 7
+
+  if today_only and days_back is None:
+    days_back = 1
+
+  return {
+    "media_only": media_only,
+    "today_only": today_only,
+    "days_back": days_back,
+  }
+
+
+def _enrich_search_media_candidates(
+  *,
+  items: list[dict[str, Any]],
+  hiker: HikerApiClient,
+  limit: int,
+  today_only: bool,
+  days_back: int | None,
+) -> dict[str, int]:
+  media_candidates = [
+    item for item in items
+    if isinstance(item, dict) and item.get("result_type") == "media" and _search_result_url(item)
+  ]
+  if not media_candidates:
+    return {"media_info_lookups": 0, "media_candidates_enriched": 0}
+
+  budget_cap = min(
+    len(media_candidates),
+    min(30, max(limit * (3 if (today_only or days_back is not None) else 2), 12)),
+  )
+  selected = media_candidates[:budget_cap]
+
+  def load_media(item: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    url = _search_result_url(item)
+    if not url:
+      raise HikerApiError("Search media result has no URL.")
+    return item, hiker.media_info(url)
+
+  lookup_count = 0
+  with ThreadPoolExecutor(max_workers=min(4, budget_cap)) as executor:
+    futures = [executor.submit(load_media, item) for item in selected]
+    for future in as_completed(futures):
+      item, media = future.result()
+      lookup_count += 1
+      item["published_at_local"] = media.get("published_at_local")
+      item["published_at_utc"] = media.get("published_at_utc")
+      item["taken_at_ts"] = media.get("raw", {}).get("taken_at") if isinstance(media.get("raw"), dict) else None
+      item["media_type"] = media.get("media_type")
+      item["product_type"] = media.get("product_type")
+      item["view_count"] = media.get("view_count")
+      item["like_count"] = media.get("like_count")
+      item["comment_count"] = media.get("comment_count")
+      item["owner_user_id"] = media.get("owner_user_id")
+      item["media_id"] = media.get("media_id")
+      item["media_pk"] = media.get("media_pk")
+      if media.get("username") and not item.get("username"):
+        item["username"] = media.get("username")
+
+  return {
+    "media_info_lookups": lookup_count,
+    "media_candidates_enriched": budget_cap,
+  }
+
+
+def _print_search_results(data: dict[str, Any]) -> None:
+  print("\n[Search results]")
+  print(f"query: {data.get('query')}")
+  if data.get("normalized_query"):
+    print(f"normalized topic: {data.get('normalized_query')}")
+  if data.get("english_translation"):
+    print(f"english translation: {data.get('english_translation')}")
+  filters = data.get("filters") if isinstance(data.get("filters"), dict) else {}
+  print(
+    "filters: "
+    f"media_only={bool(filters.get('media_only'))}, "
+    f"today_only={bool(filters.get('today_only'))}, "
+    f"days_back={filters.get('days_back') or 'any'}"
+  )
+  query_variants = data.get("query_variants") if isinstance(data.get("query_variants"), list) else []
+  if query_variants:
+    print(f"queries used: {', '.join(str(item) for item in query_variants)}")
+  print(f"returned: {data.get('count', 0)} / {data.get('available_count', 0)}")
+  budget = data.get("api_budget") if isinstance(data.get("api_budget"), dict) else {}
+  if budget:
+    print(
+      "api budget: "
+      f"search_requests={budget.get('search_requests', 0)}, "
+      f"media_info_lookups={budget.get('media_info_lookups', 0)}"
+    )
+  notes = data.get("notes") if isinstance(data.get("notes"), list) else []
+  for note in notes:
+    if isinstance(note, str) and note.strip():
+      print(f"note: {note.strip()}")
+  items = data.get("items") if isinstance(data.get("items"), list) else []
+  for index, item in enumerate(items, start=1):
+    if not isinstance(item, dict):
+      continue
+    url = _search_result_url(item) or item.get("media_url") or item.get("shortcode") or item.get("id")
+    if item.get("result_type") == "profile":
+      print(
+        f"{index}. profile {url}"
+        f"{' verified' if item.get('is_verified') else ''}"
+        f"{' private' if item.get('is_private') else ''}"
+      )
+      print(f"   username: @{item.get('username') or 'unknown'}")
+      if item.get("full_name"):
+        print(f"   {item.get('full_name')}")
+    else:
+      print(f"{index}. media {url}")
+      if item.get("username"):
+        print(f"   by @{item.get('username')}")
+      published = item.get("published_at_local") or item.get("published_at_utc")
+      if published:
+        print(f"   published: {published}")
+      if item.get("caption"):
+        print(f"   {str(item.get('caption'))[:120]}")
+  print("")
+
+
 def _print_reel_stats(data: dict[str, Any]) -> None:
   print("\n[Reel stats]")
   print(f"url: {data.get('url')}")
@@ -684,33 +885,6 @@ def _print_reel_stats(data: dict[str, Any]) -> None:
   if caption:
     print(f"caption: {caption[:200]}")
   print("")
-
-
-def _print_search_results(data: dict[str, Any]) -> None:
-  print("\n[Search results]")
-  print(f"query: {data.get('query')}")
-  print(f"returned: {data.get('count', 0)} / {data.get('available_count', 0)}")
-  print(f"more available: {data.get('more_available')}")
-  items = data.get("items") if isinstance(data.get("items"), list) else []
-  for index, item in enumerate(items, start=1):
-    if not isinstance(item, dict):
-      continue
-    if item.get("result_type") == "profile":
-      print(
-        f"{index}. profile @{item.get('username') or 'unknown'}"
-        f"{' verified' if item.get('is_verified') else ''}"
-        f"{' private' if item.get('is_private') else ''}"
-      )
-      if item.get("full_name"):
-        print(f"   {item.get('full_name')}")
-    else:
-      print(f"{index}. media {item.get('media_url') or item.get('shortcode') or item.get('id')}")
-      if item.get("username"):
-        print(f"   by @{item.get('username')}")
-      if item.get("caption"):
-        print(f"   {str(item.get('caption'))[:120]}")
-  print("")
-
 
 def _print_profile_stats(data: dict[str, Any]) -> None:
   print("\n[Profile stats]")
@@ -945,7 +1119,7 @@ def _print_help() -> None:
     "\nCommands:\n"
     "- help: show this help\n"
     "- actions: show available actions\n"
-    "- search <query>: discover profiles/media by keyword\n"
+    "- search <query>: discover profiles/media by topic with multilingual expansion\n"
     "- open [url|@username|index|profile|reel]: open a result in the default browser\n"
     "- reel <instagram_reel_url>: fetch reel stats\n"
     "- profile <instagram_profile_url_or_username>: fetch profile stats\n"
@@ -974,6 +1148,8 @@ def _print_help() -> None:
     "\nNatural language works via tool calling (examples):\n"
     "- how many followers does lupikovoleg have?\n"
     "- search portugal creators\n"
+    "- find reels about an attack on Dubai\n"
+    "- find today's reels about an attack on Dubai\n"
     "- open 1\n"
     "- open profile\n"
     "- does @username have stories?\n"
@@ -995,7 +1171,7 @@ def _print_actions() -> None:
   print(
     "\nAvailable actions now:\n"
     "1. Get Reel metrics by URL: views, likes, comments, saves, engagement, publish time.\n"
-    "2. Search Instagram by keyword to discover profiles and media candidates.\n"
+    "2. Search Instagram by topic with multilingual query expansion, deduping, and freshness filters.\n"
     "3. Open a found profile/media URL in the default browser from a URL, username, or list index.\n"
     "4. Get Profile metrics by URL/@username: followers, following, posts, verified/private, stories.\n"
     "5. Fetch filtered profile reels by recency.\n"
@@ -1619,35 +1795,170 @@ def _tool_search_instagram(
   *,
   query: str,
   limit: int,
+  media_only: bool,
+  today_only: bool,
+  days_back: int | None,
   state: SessionState,
   hiker: HikerApiClient,
+  agent: OpenRouterAgent | None = None,
 ) -> dict[str, Any]:
-  payload = hiker.topsearch(query, limit=limit, flat=True)
+  requested_limit = max(1, min(limit, 20))
+  inferred = _infer_search_preferences(query)
+  effective_today_only = today_only or bool(inferred.get("today_only"))
+  effective_days_back = days_back if isinstance(days_back, int) else inferred.get("days_back")
+  effective_media_only = media_only or bool(inferred.get("media_only")) or effective_today_only or effective_days_back is not None
+
+  if effective_today_only and effective_days_back is None:
+    effective_days_back = 1
+  if isinstance(effective_days_back, int):
+    effective_days_back = max(1, min(effective_days_back, 30))
+
+  if agent is not None:
+    query_plan = agent.expand_search_query(
+      query=query,
+      media_only=effective_media_only,
+      today_only=effective_today_only,
+      days_back=effective_days_back,
+      model=state.current_model,
+    )
+  else:
+    query_plan = {
+      "original_query": query.strip(),
+      "normalized_topic": query.strip(),
+      "english_translation": None,
+      "queries": [query.strip()],
+      "source": "fallback",
+    }
+
+  query_variants = [
+    str(item).strip()
+    for item in query_plan.get("queries", [])
+    if isinstance(item, str) and str(item).strip()
+  ][:5]
+  if not query_variants:
+    query_variants = [query.strip()]
+
+  per_query_limit = min(12, max(requested_limit, 8))
+  merged: dict[str, dict[str, Any]] = {}
+  more_available = False
+  search_requests = 0
+
+  for variant in query_variants:
+    payload = hiker.topsearch(variant, limit=per_query_limit, flat=True)
+    search_requests += 1
+    more_available = more_available or bool(payload.get("more_available"))
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    for rank, raw_item in enumerate(items, start=1):
+      if not isinstance(raw_item, dict):
+        continue
+      item = dict(raw_item)
+      if item.get("result_type") == "profile":
+        item["profile_url"] = _profile_url(str(item.get("username") or "").strip())
+      key = _search_result_key(item)
+      existing = merged.get(key)
+      if existing is None:
+        item["matched_queries"] = [variant]
+        item["search_hits"] = 1
+        item["best_rank"] = rank
+        merged[key] = item
+        continue
+      existing["search_hits"] = int(existing.get("search_hits") or 0) + 1
+      existing["best_rank"] = min(int(existing.get("best_rank") or rank), rank)
+      matched_queries = existing.get("matched_queries") if isinstance(existing.get("matched_queries"), list) else []
+      if variant not in matched_queries:
+        matched_queries.append(variant)
+      existing["matched_queries"] = matched_queries
+      for field_name, field_value in item.items():
+        if field_name in {"matched_queries", "search_hits", "best_rank"}:
+          continue
+        if _is_missing_value(existing.get(field_name)) and not _is_missing_value(field_value):
+          existing[field_name] = field_value
+
+  items = sorted(merged.values(), key=_search_sort_key)
+  if effective_media_only:
+    items = [item for item in items if item.get("result_type") == "media"]
+
+  budget = {"search_requests": search_requests, "media_info_lookups": 0, "media_candidates_enriched": 0}
+  notes: list[str] = []
+  if effective_today_only or effective_days_back is not None:
+    if items:
+      enrichment = _enrich_search_media_candidates(
+        items=items,
+        hiker=hiker,
+        limit=requested_limit,
+        today_only=effective_today_only,
+        days_back=effective_days_back,
+      )
+      budget.update(enrichment)
+      media_count = len(items)
+      if enrichment["media_candidates_enriched"] < media_count:
+        notes.append(
+          "Freshness filtering was applied only to the top media candidates to keep API spend bounded."
+        )
+
+    now_local = datetime.now().astimezone()
+    cutoff = now_local - timedelta(days=effective_days_back) if isinstance(effective_days_back, int) else None
+    filtered_items: list[dict[str, Any]] = []
+    for item in items:
+      dt = _search_item_datetime(item)
+      if dt is None:
+        continue
+      dt_local = dt.astimezone()
+      if effective_today_only and dt_local.date() != now_local.date():
+        continue
+      if cutoff is not None and dt_local < cutoff:
+        continue
+      filtered_items.append(item)
+    items = sorted(
+      filtered_items,
+      key=lambda item: (
+        -(int(_search_item_datetime(item).timestamp()) if _search_item_datetime(item) is not None else 0),
+        -int(item.get("search_hits") or 0),
+        int(item.get("best_rank") or 9999),
+      ),
+    )
+
+  final_items = items[:requested_limit]
+  safe_items = [_without_raw(item) for item in final_items if isinstance(item, dict)]
+  payload = {
+    "entity_type": "search_results",
+    "query": query.strip(),
+    "normalized_query": query_plan.get("normalized_topic"),
+    "english_translation": query_plan.get("english_translation"),
+    "query_variants": query_variants,
+    "query_plan_source": query_plan.get("source"),
+    "filters": {
+      "media_only": effective_media_only,
+      "today_only": effective_today_only,
+      "days_back": effective_days_back,
+    },
+    "count": len(safe_items),
+    "available_count": len(items),
+    "more_available": more_available,
+    "source_endpoint": "/gql/topsearch",
+    "api_budget": budget,
+    "notes": notes,
+    "items": safe_items,
+  }
   _update_context_with_stats(state, payload)
-  items = payload.get("items") if isinstance(payload.get("items"), list) else []
-  safe_items = [_without_raw(item) for item in items if isinstance(item, dict)]
   _set_last_collection(
     state,
     name="search_results",
     rows=[item for item in safe_items if isinstance(item, dict)],
     metadata={
-      "query": payload.get("query"),
-      "available_count": payload.get("available_count"),
-      "more_available": payload.get("more_available"),
-      "source_endpoint": payload.get("source_endpoint"),
+      "query": payload["query"],
+      "normalized_query": payload.get("normalized_query"),
+      "english_translation": payload.get("english_translation"),
+      "query_variants": payload.get("query_variants"),
+      "filters": payload.get("filters"),
+      "available_count": payload["available_count"],
+      "more_available": payload["more_available"],
+      "source_endpoint": payload["source_endpoint"],
+      "api_budget": payload.get("api_budget"),
     },
     filename_hint=f"search-{query}",
   )
-  return {
-    "ok": True,
-    "query": payload.get("query"),
-    "count": payload.get("count"),
-    "available_count": payload.get("available_count"),
-    "more_available": payload.get("more_available"),
-    "end_cursor": payload.get("end_cursor"),
-    "source_endpoint": payload.get("source_endpoint"),
-    "items": safe_items,
-  }
+  return {"ok": True, **payload}
 
 
 def _tool_get_reel_stats(
@@ -2201,6 +2512,7 @@ def _execute_agent_tool(
   *,
   state: SessionState,
   hiker: HikerApiClient,
+  agent: OpenRouterAgent | None = None,
 ) -> dict[str, Any]:
   try:
     if tool_name == "get_session_context":
@@ -2217,11 +2529,25 @@ def _execute_agent_tool(
         limit = int(args.get("limit", 10))
       except (TypeError, ValueError):
         limit = 10
+      media_only = bool(args.get("media_only"))
+      today_only = bool(args.get("today_only"))
+      days_back_raw = args.get("days_back")
+      if days_back_raw in {None, ""}:
+        days_back = None
+      else:
+        try:
+          days_back = int(days_back_raw)
+        except (TypeError, ValueError):
+          days_back = None
       return _tool_search_instagram(
         query=query,
         limit=max(1, min(limit, 20)),
+        media_only=media_only,
+        today_only=today_only,
+        days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
         state=state,
         hiker=hiker,
+        agent=agent,
       )
 
     if tool_name == "get_profile_stats":
@@ -2551,7 +2877,7 @@ def _render_assistant_markdown_stream(
       answer = agent.ask_with_tools(
         question=user_text,
         tool_specs=_AGENT_TOOL_SPECS,
-        tool_executor=lambda name, args: _execute_agent_tool(name, args, state=state, hiker=hiker),
+        tool_executor=lambda name, args: _execute_agent_tool(name, args, state=state, hiker=hiker, agent=agent),
         context=_build_agent_context(state),
         history=state.chat_history,
         model=state.current_model,
@@ -2603,7 +2929,7 @@ def _run_agent_turn(
         answer = agent.ask_with_tools(
           question=user_text,
           tool_specs=_AGENT_TOOL_SPECS,
-          tool_executor=lambda name, args: _execute_agent_tool(name, args, state=state, hiker=hiker),
+          tool_executor=lambda name, args: _execute_agent_tool(name, args, state=state, hiker=hiker, agent=agent),
           context=_build_agent_context(state),
           history=state.chat_history,
           model=state.current_model,
@@ -2744,7 +3070,16 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
         print("Usage: search <query>\n")
         continue
       try:
-        result = _tool_search_instagram(query=query, limit=10, state=state, hiker=hiker)
+        result = _tool_search_instagram(
+          query=query,
+          limit=10,
+          media_only=False,
+          today_only=False,
+          days_back=None,
+          state=state,
+          hiker=hiker,
+          agent=agent,
+        )
         if not result.get("ok"):
           print(f"Error: {result.get('error')}\n")
           continue
