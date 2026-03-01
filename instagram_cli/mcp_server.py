@@ -53,6 +53,8 @@ def _mcp_instructions() -> str:
     "Instagram CLI MCP server. "
     "Use these tools for Instagram discovery, stats, audience analysis, downloads, and exports. "
     "This server is stateless for targets: pass explicit usernames or media URLs to tools. "
+    "For search_instagram, the MCP client may supply query_variants with translations or synonyms. "
+    "The server does not use OpenRouter internally for MCP search expansion. "
     "Most tools return a result_id. Use read_result or export_result for follow-up actions on that stored result."
   )
 
@@ -101,6 +103,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
       "openrouter_model": runtime_settings.openrouter_chat_model,
       "hikerapi_configured": bool(runtime_settings.hiker_access_key),
       "openrouter_configured": bool(runtime_settings.openrouter_api_key),
+      "mcp_search_uses_openrouter": False,
       "capabilities": {
         "search": True,
         "profile_stats": True,
@@ -160,13 +163,19 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
       filename_hint=filename_hint,
     )
 
-  @server.tool(description="Search Instagram by topic with multilingual query expansion and optional freshness filters.")
+  @server.tool(
+    description=(
+      "Search Instagram by topic with optional client-supplied query_variants, media filtering, and freshness filters. "
+      "In MCP mode this tool is deterministic and does not call OpenRouter internally."
+    ),
+  )
   def search_instagram(
     query: str,
     limit: int = 10,
     media_only: bool = False,
     today_only: bool = False,
     days_back: int | None = None,
+    query_variants: list[str] | None = None,
   ) -> dict[str, Any]:
     return safe_tool(ops.search_instagram)(
       query=query,
@@ -174,6 +183,8 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
       media_only=media_only,
       today_only=today_only,
       days_back=days_back,
+      query_variants=query_variants,
+      use_llm_expansion=False,
     )
 
   @server.tool(description="Get Instagram profile stats by username or profile URL.")

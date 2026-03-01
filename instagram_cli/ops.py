@@ -114,6 +114,8 @@ class InstagramOps:
     media_only: bool = False,
     today_only: bool = False,
     days_back: int | None = None,
+    query_variants: list[str] | None = None,
+    use_llm_expansion: bool = True,
   ) -> dict[str, Any]:
     state = self._state()
     return _tool_search_instagram(
@@ -122,9 +124,10 @@ class InstagramOps:
       media_only=media_only,
       today_only=today_only,
       days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+      query_variants=query_variants,
       state=state,
       hiker=self.hiker,
-      agent=self.agent if self.agent.enabled else None,
+      agent=self.agent if self.agent.enabled and use_llm_expansion else None,
     )
 
   def get_profile_stats(self, *, target: str) -> dict[str, Any]:

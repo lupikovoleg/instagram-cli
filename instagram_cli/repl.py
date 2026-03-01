@@ -1798,6 +1798,7 @@ def _tool_search_instagram(
   media_only: bool,
   today_only: bool,
   days_back: int | None,
+  query_variants: list[str] | None = None,
   state: SessionState,
   hiker: HikerApiClient,
   agent: OpenRouterAgent | None = None,
@@ -1813,7 +1814,21 @@ def _tool_search_instagram(
   if isinstance(effective_days_back, int):
     effective_days_back = max(1, min(effective_days_back, 30))
 
-  if agent is not None:
+  supplied_query_variants = [
+    str(item).strip()
+    for item in (query_variants or [])
+    if isinstance(item, str) and str(item).strip()
+  ]
+
+  if supplied_query_variants:
+    query_plan = {
+      "original_query": query.strip(),
+      "normalized_topic": query.strip(),
+      "english_translation": None,
+      "queries": [query.strip(), *supplied_query_variants],
+      "source": "client",
+    }
+  elif agent is not None:
     query_plan = agent.expand_search_query(
       query=query,
       media_only=effective_media_only,
@@ -1822,13 +1837,7 @@ def _tool_search_instagram(
       model=state.current_model,
     )
   else:
-    query_plan = {
-      "original_query": query.strip(),
-      "normalized_topic": query.strip(),
-      "english_translation": None,
-      "queries": [query.strip()],
-      "source": "fallback",
-    }
+    query_plan = OpenRouterAgent._fallback_search_plan(query)
 
   query_variants = [
     str(item).strip()

@@ -222,6 +222,8 @@ Notes:
 - MCP v1 is stateless for targets: pass explicit usernames or media URLs to tools.
 - Most data tools return a `result_id`.
 - Use `read_result(result_id)` or `export_result(result_id, format)` for follow-up operations.
+- In MCP mode, `search_instagram` does not call OpenRouter internally.
+- For best search quality, the MCP client should pass `query_variants` with translations or synonyms when useful.
 
 ### Claude Code Setup
 
@@ -285,6 +287,23 @@ Export the previous result to csv.
 Download the audio from this reel: https://www.instagram.com/reel/XXXXXXXXXXX/
 ```
 
+When Claude supports passing richer tool arguments, an ideal MCP search call looks like:
+
+```json
+{
+  "query": "найди рилсы сегодняшние про атаку на дубай",
+  "query_variants": [
+    "атака на дубай",
+    "attack on Dubai",
+    "Dubai attack",
+    "взрыв в дубае"
+  ],
+  "media_only": true,
+  "today_only": true,
+  "limit": 5
+}
+```
+
 ## Environment Variables
 
 Required:
@@ -336,6 +355,7 @@ Optional:
   - merges and deduplicates results
   - keeps only media when the user asks for reels/posts
   - enriches media timestamps and filters by `today` / `last N days` when freshness matters
+- In MCP mode, the server keeps the same deterministic merge/dedupe/filter pipeline, but query expansion should come from the MCP client via `query_variants`.
 - For simple direct input (single URL or username), CLI can call stats endpoints directly.
 
 ## Repo Updates
