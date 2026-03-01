@@ -2,6 +2,15 @@
 
 Terminal-first Instagram analytics: profile and Reels stats + an agent with tool calling for natural-language queries.
 
+```text
+ ___ _   _ ____ _____  _    ____ ____      _    __  __      ____ _     ___
+|_ _| \ | / ___|_   _|/ \  / ___|  _ \    / \  |  \/  |    / ___| |   |_ _|
+ | ||  \| \___ \ | | / _ \| |  _| |_) |  / _ \ | |\/| |   | |   | |    | |
+ | || |\  |___) || |/ ___ \ |_| |  _ <  / ___ \| |  | |   | |___| |___ | |
+|___|_| \_|____/ |_/_/   \_\____|_| \_\/_/   \_\_|  |_|    \____|_____|___|
+                           INSTAGRAM-CLI by @lupikovoleg
+```
+
 ## Features
 
 - Fetch Reels stats by URL:
@@ -69,7 +78,7 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
 ## Installation
 
 ```bash
-cd /Users/oleglupikov/instagram-cli
+cd /path/to/instagram-cli
 ./install.sh
 ```
 
@@ -81,7 +90,7 @@ instagram
 
 ## First Run Setup
 
-This CLI uses its **own** `.env` file (not `retenza/.env`).
+This CLI uses its **own** `.env` file.
 
 Default path:
 - `<project_root>/.env`
@@ -259,7 +268,7 @@ When the target is omitted, the CLI uses current session context first:
 
 Downloaded files are stored under:
 
-- `/Users/oleglupikov/instagram-cli/output/downloads/`
+- `/path/to/instagram-cli/output/downloads/`
 
 Each download run creates:
 
