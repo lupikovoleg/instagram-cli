@@ -266,6 +266,13 @@ def _guess_extension_from_url(url: str, *, default: str) -> str:
   return default
 
 
+def _guess_audio_extension_from_url(url: str) -> str:
+  extension = _guess_extension_from_url(url, default=".m4a")
+  if extension == ".mp4":
+    return ".m4a"
+  return extension
+
+
 def _best_video_url(candidates: Any) -> str | None:
   if not isinstance(candidates, list):
     return None
@@ -1268,7 +1275,7 @@ class HikerApiClient:
         "title": title,
         "artist": artist,
         "audio_url": audio_url,
-        "extension": _guess_extension_from_url(audio_url, default=".m4a"),
+        "extension": _guess_audio_extension_from_url(audio_url),
       },
       "assets": [
         {
@@ -1278,7 +1285,7 @@ class HikerApiClient:
           "shortcode": media.get("shortcode"),
           "title": title,
           "artist": artist,
-          "extension": _guess_extension_from_url(audio_url, default=".m4a"),
+          "extension": _guess_audio_extension_from_url(audio_url),
         },
       ],
     }
