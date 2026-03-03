@@ -101,6 +101,28 @@ def _calculate_virality(views: int, likes: int, comments: int, saves: int) -> di
   }
 
 
+def _classify_publication_kind(media: dict[str, Any]) -> str:
+  product_type = _as_str(media.get("product_type"))
+  media_type = _as_int(media.get("media_type"))
+  if product_type == "clips":
+    return "reel"
+  if product_type == "carousel_container" or media_type == 8:
+    return "carousel"
+  if media_type == 1:
+    return "image_post"
+  if media_type == 2:
+    return "video_post"
+  return "media"
+
+
+def _instagram_media_url(shortcode: str | None, publication_kind: str) -> str | None:
+  if not shortcode:
+    return None
+  if publication_kind == "reel":
+    return f"https://www.instagram.com/reel/{shortcode}/"
+  return f"https://www.instagram.com/p/{shortcode}/"
+
+
 def _normalize_reel_payload(media: dict[str, Any], *, reel_url: str | None = None) -> dict[str, Any]:
   product_type = _as_str(media.get("product_type"))
 
@@ -163,6 +185,75 @@ def _normalize_reel_payload(media: dict[str, Any], *, reel_url: str | None = Non
     "viral_status": virality["viral_status"],
     "viral_label": virality["viral_label"],
     "virality_engagement_raw": virality["virality_engagement_raw"],
+    "raw": media,
+  }
+
+
+def _normalize_publication_payload(media: dict[str, Any]) -> dict[str, Any]:
+  product_type = _as_str(media.get("product_type"))
+  publication_kind = _classify_publication_kind(media)
+
+  views = _as_int(
+    media.get("play_count")
+    or media.get("video_view_count")
+    or media.get("view_count")
+    or media.get("content_views_count"),
+  )
+  likes = _as_int(media.get("like_count") or media.get("likes"))
+  comments = _as_int(media.get("comment_count") or media.get("comments"))
+  saves = _as_int(
+    media.get("save_count")
+    or media.get("saved_count")
+    or media.get("saves_count")
+    or media.get("bookmark_count"),
+  )
+  engagement_raw = likes + comments + saves
+  engagement_rate = round((engagement_raw / views), 4) if views > 0 else 0.0
+
+  owner = media.get("user") if isinstance(media.get("user"), dict) else {}
+  if not owner:
+    owner = media.get("owner") if isinstance(media.get("owner"), dict) else {}
+  username = _as_str(owner.get("username")) or _as_str(media.get("username"))
+
+  caption = None
+  if isinstance(media.get("caption"), dict):
+    caption = _as_str(media.get("caption", {}).get("text"))
+  caption = caption or _as_str(media.get("caption_text")) or _as_str(media.get("title"))
+
+  timestamp = _timestamp_from_any(
+    media.get("taken_at")
+    or media.get("taken_at_ts")
+    or media.get("created_time")
+    or media.get("timestamp"),
+  )
+  published_at_utc, published_at_local = _format_datetime(timestamp)
+  shortcode = _as_str(media.get("code"))
+  url = _instagram_media_url(shortcode, publication_kind)
+  virality = _calculate_virality(views, likes, comments, saves)
+
+  return {
+    "entity_type": "publication_preview",
+    "url": url,
+    "shortcode": shortcode,
+    "username": username,
+    "media_type": media.get("media_type"),
+    "product_type": product_type,
+    "publication_kind": publication_kind,
+    "caption": caption,
+    "published_at_utc": published_at_utc,
+    "published_at_local": published_at_local,
+    "taken_at_ts": int(timestamp) if timestamp is not None else None,
+    "views": views,
+    "likes": likes,
+    "comments": comments,
+    "saves": saves,
+    "engagement_raw": engagement_raw,
+    "engagement_rate": engagement_rate,
+    "viral_index": virality["viral_index"],
+    "viral_status": virality["viral_status"],
+    "viral_label": virality["viral_label"],
+    "virality_engagement_raw": virality["virality_engagement_raw"],
+    "item_count": len(media.get("resources")) if isinstance(media.get("resources"), list) else 1,
     "raw": media,
   }
 
@@ -361,6 +452,7 @@ class HikerApiClient:
     self._media_likers_cache: dict[str, dict[str, Any]] = {}
     self._media_comments_cache: dict[str, dict[str, Any]] = {}
     self._clips_chunk_cache: dict[tuple[str, str, int], tuple[list[dict[str, Any]], str | None]] = {}
+    self._medias_chunk_cache: dict[tuple[str, str, int], tuple[list[dict[str, Any]], str | None]] = {}
     self._stories_cache: dict[str, list[dict[str, Any]]] = {}
     self._highlights_cache: dict[str, list[dict[str, Any]]] = {}
     self._highlight_detail_cache: dict[str, dict[str, Any]] = {}
@@ -938,6 +1030,123 @@ class HikerApiClient:
       "scanned_reels": scanned_count,
       "next_page_id": page_cursor,
       "source_endpoint": "/v1/user/clips/chunk",
+    }
+
+  def profile_publications(
+    self,
+    target: str,
+    *,
+    limit: int = 12,
+    days_back: int | None = None,
+    publication_type: str = "all",
+    max_pages: int = 3,
+    page_size: int = 12,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    requested_limit = max(1, min(limit, 20))
+    requested_page_size = max(1, min(page_size, 24))
+    requested_max_pages = max(1, min(max_pages, 5))
+    type_text = publication_type.strip().lower()
+    if type_text not in {"all", "reels", "posts", "carousels"}:
+      raise HikerApiError("publication_type must be one of: all, reels, posts, carousels.")
+
+    cutoff_ts: int | None = None
+    if days_back is not None:
+      requested_days_back = max(1, min(days_back, 30))
+      cutoff_ts = int(time.time() - (requested_days_back * 86400))
+    else:
+      requested_days_back = None
+
+    page_cursor: str | None = None
+    pages_used = 0
+    scanned_count = 0
+    publications: list[dict[str, Any]] = []
+    seen_shortcodes: set[str] = set()
+
+    def matches(publication_kind: str) -> bool:
+      if type_text == "all":
+        return True
+      if type_text == "reels":
+        return publication_kind == "reel"
+      if type_text == "carousels":
+        return publication_kind == "carousel"
+      return publication_kind != "reel"
+
+    while pages_used < requested_max_pages and len(publications) < requested_limit:
+      cache_key = (str(user_id), page_cursor or "", requested_page_size)
+      cached_page = self._medias_chunk_cache.get(cache_key)
+      if cached_page is None:
+        raw_payload = self._request(
+          "/v1/user/medias/chunk",
+          {
+            "user_id": str(user_id),
+            "end_cursor": page_cursor or None,
+            "page_size": requested_page_size,
+          },
+        )
+        if not isinstance(raw_payload, list) or len(raw_payload) != 2:
+          raise HikerApiError("Unexpected HikerAPI response format for user medias chunk.")
+        raw_items = raw_payload[0] if isinstance(raw_payload[0], list) else []
+        raw_cursor = _as_str(raw_payload[1])
+        cached_page = ([item for item in raw_items if isinstance(item, dict)], raw_cursor)
+        self._medias_chunk_cache[cache_key] = cached_page
+
+      page_items, next_cursor = cached_page
+      pages_used += 1
+      page_cursor = next_cursor
+      stop_for_cutoff = False
+
+      for item in page_items:
+        normalized = _normalize_publication_payload(item)
+        scanned_count += 1
+
+        shortcode = _as_str(normalized.get("shortcode"))
+        if shortcode and shortcode in seen_shortcodes:
+          continue
+        if shortcode:
+          seen_shortcodes.add(shortcode)
+
+        taken_at_ts = int(normalized.get("taken_at_ts") or 0)
+        if cutoff_ts is not None and taken_at_ts and taken_at_ts < cutoff_ts:
+          stop_for_cutoff = True
+          continue
+
+        if not matches(str(normalized.get("publication_kind") or "")):
+          continue
+
+        publications.append(normalized)
+        if len(publications) >= requested_limit:
+          break
+
+      if len(publications) >= requested_limit:
+        break
+      if stop_for_cutoff:
+        break
+      if not page_cursor:
+        break
+
+    publications.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+
+    return {
+      "entity_type": "profile_publications",
+      "username": _as_str(user.get("username")) or username,
+      "user_id": str(user_id),
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "publications": publications[:requested_limit],
+      "filters": {
+        "limit": requested_limit,
+        "days_back": requested_days_back,
+        "publication_type": type_text,
+      },
+      "pages_used": pages_used,
+      "scanned_publications": scanned_count,
+      "next_page_id": page_cursor,
+      "source_endpoint": "/v1/user/medias/chunk",
     }
 
   def recent_reels(self, target: str, limit: int = 12) -> dict[str, Any]:

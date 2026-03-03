@@ -178,6 +178,43 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
   {
     "type": "function",
     "function": {
+      "name": "get_profile_publications",
+      "description": (
+        "Get profile publications from the main grid, including reels, posts, and carousels. "
+        "If target is omitted, use the current profile from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many publications to return (1..20)",
+            "minimum": 1,
+            "maximum": 20,
+          },
+          "days_back": {
+            "type": "integer",
+            "description": "Only include publications from the last N days (1..30)",
+            "minimum": 1,
+            "maximum": 30,
+          },
+          "publication_type": {
+            "type": "string",
+            "enum": ["all", "reels", "posts", "carousels"],
+            "description": "Filter main-grid publications by type.",
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_followers_page",
       "description": "Get one page of followers for a profile with low API cost.",
       "parameters": {
@@ -552,6 +589,7 @@ class SessionState:
   current_search_results: dict[str, Any] | None = None
   recent_reels: list[dict[str, Any]] | None = None
   current_profile_reels: dict[str, Any] | None = None
+  current_profile_publications: dict[str, Any] | None = None
   current_followers_page: dict[str, Any] | None = None
   current_top_followers: dict[str, Any] | None = None
   current_stories: dict[str, Any] | None = None
@@ -991,6 +1029,31 @@ def _print_profile_reels(data: dict[str, Any]) -> None:
   print("")
 
 
+def _print_profile_publications(data: dict[str, Any]) -> None:
+  print("\n[Profile publications]")
+  print(f"target: @{data.get('username')}")
+  filters = data.get("filters") if isinstance(data.get("filters"), dict) else {}
+  print(
+    "filters: "
+    f"publication_type={filters.get('publication_type') or 'all'}, "
+    f"days_back={filters.get('days_back') or 'any'}, "
+    f"limit={filters.get('limit') or 0}"
+  )
+  print(f"pages used: {data.get('pages_used', 0)}")
+  print(f"scanned publications: {data.get('scanned_publications', 0)}")
+  publications = data.get("publications") if isinstance(data.get("publications"), list) else []
+  for index, item in enumerate(publications, start=1):
+    if not isinstance(item, dict):
+      continue
+    username = item.get("username") or data.get("username") or "unknown"
+    print(
+      f"{index}. [{item.get('publication_kind') or 'media'}] @{username} {item.get('url') or ''}\n"
+      f"   {item.get('published_at_local') or 'unknown'} | "
+      f"likes={item.get('likes', 0)} comments={item.get('comments', 0)} views={item.get('views', 0)}"
+    )
+  print("")
+
+
 def _print_media_comments(data: dict[str, Any]) -> None:
   media = data.get("media") if isinstance(data.get("media"), dict) else {}
   print("\n[Media comments]")
@@ -1124,6 +1187,7 @@ def _print_help() -> None:
     "- reel <instagram_reel_url>: fetch reel stats\n"
     "- profile <instagram_profile_url_or_username>: fetch profile stats\n"
     "- reels <instagram_profile_url_or_username> [limit] [days_back]: fetch filtered reels\n"
+    "- publications <instagram_profile_url_or_username> [limit] [days_back] [all|reels|posts|carousels]: fetch profile publications\n"
     "- stories [instagram_profile_url_or_username] [limit]: list active stories\n"
     "- highlights [instagram_profile_url_or_username] [limit]: list highlight folders\n"
     "- comments <instagram_media_url> [limit]: fetch media comments\n"
@@ -1158,6 +1222,8 @@ def _print_help() -> None:
     "- show this profile's stories\n"
     "- show this profile's highlights\n"
     "- show the last 5 reels from this profile from the last week\n"
+    "- show the last 10 publications from this profile\n"
+    "- show carousels from this profile\n"
     "- export that to csv\n"
     "- download this reel\n"
     "- download audio from this reel\n"
@@ -1175,13 +1241,14 @@ def _print_actions() -> None:
     "3. Open a found profile/media URL in the default browser from a URL, username, or list index.\n"
     "4. Get Profile metrics by URL/@username: followers, following, posts, verified/private, stories.\n"
     "5. Fetch filtered profile reels by recency.\n"
-    "6. Fetch media comments and media likers.\n"
-    "7. List active stories and highlight folders for a profile.\n"
-    "8. Fetch follower pages with low API cost.\n"
-    "9. Estimate top followers from a bounded sampled subset to control API spend.\n"
-    "10. Rank likers by follower count when explicitly requested.\n"
-    "11. Export the current collection to CSV or JSON.\n"
-    "12. Download reels, posts, stories, highlights, and media audio to local files.\n"
+    "6. Fetch profile publications from the main grid, including carousels and non-reel posts.\n"
+    "7. Fetch media comments and media likers.\n"
+    "8. List active stories and highlight folders for a profile.\n"
+    "9. Fetch follower pages with low API cost.\n"
+    "10. Estimate top followers from a bounded sampled subset to control API spend.\n"
+    "11. Rank likers by follower count when explicitly requested.\n"
+    "12. Export the current collection to CSV or JSON.\n"
+    "13. Download reels, posts, stories, highlights, and media audio to local files.\n"
     "13. Check for remote git updates at startup and update safely with 'update'.\n"
     "14. Ask natural language questions; agent decides tool calls automatically.\n"
     "15. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
@@ -1287,6 +1354,7 @@ def _resolve_profile_target(target: str | None, state: SessionState) -> str | No
     state.current_media,
     state.current_reel,
     state.current_profile_reels.get("profile") if isinstance(state.current_profile_reels, dict) else None,
+    state.current_profile_publications.get("profile") if isinstance(state.current_profile_publications, dict) else None,
   ):
     if not isinstance(source, dict):
       continue
@@ -1339,6 +1407,20 @@ def _openable_items_from_state(state: SessionState) -> list[dict[str, str]]:
       if not url:
         continue
       label = str(item.get("shortcode") or item.get("username") or url)
+      items.append({"label": label, "url": url})
+
+  profile_publications = (
+    state.current_profile_publications.get("publications")
+    if isinstance(state.current_profile_publications, dict) else None
+  )
+  if isinstance(profile_publications, list):
+    for item in profile_publications:
+      if not isinstance(item, dict):
+        continue
+      url = str(item.get("url") or "").strip()
+      if not url:
+        continue
+      label = str(item.get("shortcode") or item.get("publication_kind") or url)
       items.append({"label": label, "url": url})
 
   if state.current_reel and isinstance(state.current_reel, dict):
@@ -1575,6 +1657,7 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
     if previous_username != next_username:
       state.recent_reels = None
       state.current_profile_reels = None
+      state.current_profile_publications = None
       state.current_followers_page = None
       state.current_top_followers = None
       state.current_media = None
@@ -1621,6 +1704,39 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
       state.current_reel = state.recent_reels[0]
     return
 
+  if entity_type == "profile_publications":
+    profile = stats.get("profile")
+    publications = stats.get("publications") if isinstance(stats.get("publications"), list) else []
+    if isinstance(profile, dict):
+      previous_username = (state.current_profile or {}).get("username")
+      state.current_profile = profile
+      if previous_username != profile.get("username"):
+        state.current_followers_page = None
+        state.current_top_followers = None
+        state.recent_reels = None
+        state.current_profile_reels = None
+    state.current_profile_publications = stats
+    if publications:
+      first = publications[0]
+      if isinstance(first, dict):
+        state.current_media = {
+          "entity_type": "media",
+          "url": first.get("url"),
+          "shortcode": first.get("shortcode"),
+          "username": first.get("username"),
+          "product_type": first.get("product_type"),
+          "published_at_utc": first.get("published_at_utc"),
+          "published_at_local": first.get("published_at_local"),
+          "media_type": first.get("media_type"),
+        }
+        if first.get("publication_kind") == "reel":
+          state.current_reel = first
+        else:
+          state.current_reel = None
+    else:
+      state.current_reel = None
+    return
+
   if entity_type == "followers_page":
     profile = stats.get("profile")
     if isinstance(profile, dict):
@@ -1629,6 +1745,7 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
       state.current_profile = profile
       if previous_username != next_username:
         state.recent_reels = None
+        state.current_profile_publications = None
         state.current_top_followers = None
     state.current_followers_page = stats
     return
@@ -1641,6 +1758,7 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
       state.current_profile = profile
       if previous_username != next_username:
         state.recent_reels = None
+        state.current_profile_publications = None
       state.current_followers_page = None
     state.current_top_followers = stats
     return
@@ -1688,6 +1806,12 @@ def _build_agent_context(state: SessionState) -> dict[str, Any]:
     if isinstance(reels, list):
       profile_reels["reels"] = [_without_raw(item) for item in reels[:5] if isinstance(item, dict)]
     context["current_profile_reels"] = profile_reels
+  if state.current_profile_publications is not None:
+    profile_publications = _without_raw(state.current_profile_publications) or {}
+    publications = profile_publications.get("publications")
+    if isinstance(publications, list):
+      profile_publications["publications"] = [_without_raw(item) for item in publications[:5] if isinstance(item, dict)]
+    context["current_profile_publications"] = profile_publications
   if state.current_followers_page is not None:
     followers_page = _without_raw(state.current_followers_page) or {}
     followers = followers_page.get("followers")
@@ -2064,6 +2188,57 @@ def _tool_get_profile_reels(
     "source_endpoint": payload.get("source_endpoint"),
     "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
     "reels": safe_reels,
+  }
+
+
+def _tool_get_profile_publications(
+  *,
+  target: str | None,
+  limit: int,
+  days_back: int | None,
+  publication_type: str,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  payload = hiker.profile_publications(
+    chosen_target,
+    limit=limit,
+    days_back=days_back,
+    publication_type=publication_type,
+  )
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_publications",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "filters": payload.get("filters"),
+      "pages_used": payload.get("pages_used"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-publications",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": len(safe_publications),
+    "filters": payload.get("filters"),
+    "pages_used": payload.get("pages_used"),
+    "scanned_publications": payload.get("scanned_publications"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "publications": safe_publications,
   }
 
 
@@ -2602,6 +2777,33 @@ def _execute_agent_tool(
         target=target_text,
         limit=max(1, min(limit, 20)),
         days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_publications":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 12))
+      except (TypeError, ValueError):
+        limit = 12
+      days_back_raw = args.get("days_back")
+      if days_back_raw in {None, ""}:
+        days_back = None
+      else:
+        try:
+          days_back = int(days_back_raw)
+        except (TypeError, ValueError):
+          days_back = None
+      publication_type = str(args.get("publication_type") or "all").strip().lower() or "all"
+      if publication_type not in {"all", "reels", "posts", "carousels"}:
+        publication_type = "all"
+      return _tool_get_profile_publications(
+        target=target_text,
+        limit=max(1, min(limit, 20)),
+        days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+        publication_type=publication_type,
         state=state,
         hiker=hiker,
       )
@@ -3164,6 +3366,59 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
         _print_profile_reels(payload)
       except HikerApiError as exc:
         print(f"Error: {exc}\n")
+      continue
+
+    if raw.startswith("publications "):
+      parts = raw.split()
+      if len(parts) < 2:
+        print("Usage: publications <instagram_profile_url_or_username> [limit] [days_back] [all|reels|posts|carousels]\n")
+        continue
+      target = parts[1]
+      limit = 12
+      days_back: int | None = None
+      publication_type = "all"
+      for token in parts[2:]:
+        lower = token.lower()
+        if lower in {"all", "reels", "posts", "carousels"}:
+          publication_type = lower
+          continue
+        if token.isdigit():
+          value = int(token)
+          if limit == 12:
+            limit = value
+          elif days_back is None:
+            days_back = value
+          else:
+            print("Usage: publications <instagram_profile_url_or_username> [limit] [days_back] [all|reels|posts|carousels]\n")
+            break
+        else:
+          print("Usage: publications <instagram_profile_url_or_username> [limit] [days_back] [all|reels|posts|carousels]\n")
+          break
+      else:
+        try:
+          payload = hiker.profile_publications(
+            target,
+            limit=max(1, min(limit, 20)),
+            days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+            publication_type=publication_type,
+          )
+          _update_context_with_stats(state, payload)
+          publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+          safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+          _set_last_collection(
+            state,
+            name="profile_publications",
+            rows=[item for item in safe_publications if isinstance(item, dict)],
+            metadata={
+              "username": payload.get("username"),
+              "filters": payload.get("filters"),
+              "pages_used": payload.get("pages_used"),
+            },
+            filename_hint=f"{payload.get('username') or 'profile'}-publications",
+          )
+          _print_profile_publications(payload)
+        except HikerApiError as exc:
+          print(f"Error: {exc}\n")
       continue
 
     if raw.startswith("stories"):

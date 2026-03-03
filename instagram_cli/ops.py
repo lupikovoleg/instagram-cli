@@ -24,6 +24,7 @@ from instagram_cli.repl import (
   _tool_get_media_comments,
   _tool_get_media_likers,
   _tool_get_profile_highlights,
+  _tool_get_profile_publications,
   _tool_get_profile_reels,
   _tool_get_profile_stats,
   _tool_get_profile_stories,
@@ -42,7 +43,7 @@ def _default_output_dir() -> Path:
 
 
 def _collection_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
-  for key in ("rows", "items", "reels", "followers", "comments", "stories", "highlights", "likers"):
+  for key in ("rows", "items", "reels", "publications", "followers", "comments", "stories", "highlights", "likers"):
     value = result.get(key)
     if isinstance(value, list):
       return [item for item in value if isinstance(item, dict)]
@@ -61,17 +62,18 @@ def _collection_name(result: dict[str, Any]) -> str:
     if isinstance(value, str) and value.strip():
       return value.strip()
   for key, name in (
-    ("profile", "profile"),
-    ("reel", "reel"),
-    ("media", "media"),
     ("items", "search_results"),
     ("reels", "profile_reels"),
+    ("publications", "profile_publications"),
     ("followers", "followers"),
     ("comments", "media_comments"),
     ("stories", "profile_stories"),
     ("highlights", "profile_highlights"),
     ("likers", "media_likers"),
     ("rows", "rows"),
+    ("profile", "profile"),
+    ("reel", "reel"),
+    ("media", "media"),
   ):
     value = result.get(key)
     if isinstance(value, list) and value:
@@ -155,6 +157,23 @@ class InstagramOps:
       target=target,
       limit=max(1, min(limit, 20)),
       days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+      state=self._state(),
+      hiker=self.hiker,
+    )
+
+  def get_profile_publications(
+    self,
+    *,
+    target: str,
+    limit: int = 12,
+    days_back: int | None = None,
+    publication_type: str = "all",
+  ) -> dict[str, Any]:
+    return _tool_get_profile_publications(
+      target=target,
+      limit=max(1, min(limit, 20)),
+      days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+      publication_type=publication_type,
       state=self._state(),
       hiker=self.hiker,
     )
@@ -298,7 +317,7 @@ class InstagramOps:
     metadata = {
       key: _json_safe_value(value)
       for key, value in result.items()
-      if key not in {"rows", "items", "reels", "followers", "comments", "stories", "highlights", "likers"}
+      if key not in {"rows", "items", "reels", "publications", "followers", "comments", "stories", "highlights", "likers"}
     }
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -109,6 +109,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
         "profile_stats": True,
         "reel_stats": True,
         "profile_reels": True,
+        "profile_publications": True,
         "stories": True,
         "highlights": True,
         "comments": True,
@@ -202,6 +203,20 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
   @server.tool(description="Get reels for a profile with an optional days_back filter.")
   def get_profile_reels(target: str, limit: int = 12, days_back: int | None = None) -> dict[str, Any]:
     return safe_tool(ops.get_profile_reels)(target=target, limit=limit, days_back=days_back)
+
+  @server.tool(description="Get main-grid profile publications, including reels, posts, and carousels.")
+  def get_profile_publications(
+    target: str,
+    limit: int = 12,
+    days_back: int | None = None,
+    publication_type: str = "all",
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_publications)(
+      target=target,
+      limit=limit,
+      days_back=days_back,
+      publication_type=publication_type,
+    )
 
   @server.tool(description="Get one low-cost followers page for a profile.")
   def get_followers_page(target: str, limit: int = 25, page_id: str | None = None) -> dict[str, Any]:

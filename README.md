@@ -1,6 +1,6 @@
 # Instagram CLI
 
-Terminal-first Instagram analytics: profile and Reels stats + an agent with tool calling for natural-language queries.
+Terminal-first Instagram analytics, downloads, and MCP tools powered.
 
 ```text
  ___ _   _ ____ _____  _    ____ ____      _    __  __      ____ _     ___
@@ -11,73 +11,34 @@ Terminal-first Instagram analytics: profile and Reels stats + an agent with tool
                            INSTAGRAM-CLI by @lupikovoleg
 ```
 
-## Features
+## What It Does
 
-- Fetch Reels stats by URL:
-  - `views`, `likes`, `comments`, `saves`
-  - `engagement_rate`
-  - publish time (`local` + `UTC`)
-  - `viral_index`
-- Fetch profile stats by URL or username:
-  - followers, following, post count
-  - `verified` / `private`
-  - stories availability (`has_stories`, `stories_count`)
-- Fetch filtered profile reels:
-  - latest reels
-  - reels from the last `N` days
-- List ephemeral/profile collections:
-  - active stories
-  - highlight folders
-- Fetch media audience data:
-  - media comments
-  - media likers
-  - ranked likers by follower count
-- Download content to local files:
+- Search Instagram by topic, including multilingual reel and media discovery
+- Filter search results by freshness, including `today` and `last N days`
+- Fetch profile stats, reel stats, comments, likers, followers, stories, and highlights
+- Analyze profile publications from the main grid:
+  - reels
+  - posts
+  - carousels
+- Download Instagram content locally:
   - reels and posts
-  - media audio tracks when the payload exposes a downloadable audio URL
+  - audio tracks
   - active stories
   - highlights
-  - download metadata JSON with saved paths
-- Inspect followers with request-budget controls:
-  - fetch one followers page with low API cost
-  - estimate `top followers` from a bounded sampled subset
-  - explicit API budget reporting (`page_requests`, `profile_lookups`, `cache_hits`)
-- Export the current collection:
-  - `csv`
-  - `json`
-- Natural-language queries (no command prefix required):
-  - `search portugal creators`
-  - `how many followers does lupikovoleg have?`
-  - `does @username have stories?`
-  - `how many likes does the latest reel have?`
-  - `who are the top followers of @username?`
-  - `show the last 5 reels from this profile from the last week`
-  - `export that to csv`
-  - paste a profile or reel URL directly
-- Session memory:
-  - current profile
-  - current reel / media
-  - recent reels for follow-up questions
-  - last collection for export and follow-up actions
-- Agent mode:
-  - model selects tools via tool calling
-  - stats are fetched from APIs (not guessed)
-- MCP server mode:
-  - expose the same Instagram capabilities to Claude or any other MCP client
-  - local `stdio` transport for Claude Code and similar clients
-  - `result_id` support for follow-up `read_result` / `export_result`
-- Output modes:
-  - `rich` Markdown render in interactive terminal
-  - `plain` text mode
-  - typing indicator before answer starts: `. .. ...`
+- Export collected results to `csv` or `json`
+- Support natural-language interaction with tool calling in the CLI
+- Handle chained workflows such as:
+  - search -> inspect -> rank -> export
+  - open a profile -> analyze publications -> download content
+  - fetch a reel -> inspect comments or likers -> export the result
+- Expose the same capability layer through a local MCP server for Claude and other MCP clients
 
 ## Requirements
 
-- macOS / Linux
-- Python 3.10+
-- API access:
-  - `HikerAPI` key
-  - `OpenRouter` key
+- macOS or Linux
+- Python `3.10+`
+- `HIKERAPI_KEY` or `HIKERAPI_TOKEN`
+- `OPENROUTER_API_KEY` for the interactive CLI agent
 
 ## Installation
 
@@ -86,175 +47,62 @@ cd /path/to/instagram-cli
 ./install.sh
 ```
 
-After install, run:
+This installs two commands:
+
+- `instagram` for the interactive CLI
+- `instagram-mcp` for the local MCP server
+
+## First Run
+
+The CLI uses its own `.env` file.
+
+- default path: `/path/to/instagram-cli/.env`
+- override path: `INSTAGRAM_CLI_ENV_FILE=/path/to/custom.env`
+
+If required keys are missing, the CLI bootstrap asks for them and writes the local `.env`.
+
+## Quick Start
+
+Start the CLI:
 
 ```bash
 instagram
 ```
 
-To run the MCP server:
+Typical commands:
+
+```text
+instagram> profile lupikovoleg
+instagram> search portugal creators
+instagram> publications lupikovoleg 10 30 all
+instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 20
+instagram> download media https://www.instagram.com/reel/XXXXXXXXXXX/
+instagram> export csv latest-results
+instagram> how many followers does @lupikovoleg have?
+instagram> find today's reels about an attack on Dubai
+```
+
+Start the MCP server:
 
 ```bash
 instagram-mcp
 ```
 
-## First Run Setup
+## MCP Setup
 
-This CLI uses its **own** `.env` file.
-
-Default path:
-- `<project_root>/.env`
-
-Override path:
-- `INSTAGRAM_CLI_ENV_FILE=/path/to/.env`
-
-If required keys are missing, on startup CLI will:
-1. ask for `HikerAPI key`
-2. ask for `OpenRouter API key`
-3. save them into its own `.env`
-4. show a quick usage guide and start interactive mode
-
-## Quick Start
-
-```bash
-instagram
-```
-
-Example prompts:
-
-```text
-instagram> profile lupikovoleg
-instagram> search portugal creators
-instagram> open 1
-instagram> update
-instagram> followers lupikovoleg 20
-instagram> top-followers lupikovoleg 25 10
-instagram> reel https://www.instagram.com/reel/XXXXXXXXXXX/
-instagram> reels lupikovoleg 5 7
-instagram> stories lupikovoleg
-instagram> highlights lupikovoleg
-instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 20
-instagram> likers https://www.instagram.com/reel/XXXXXXXXXXX/ 20
-instagram> download media https://www.instagram.com/reel/XXXXXXXXXXX/
-instagram> download audio https://www.instagram.com/reel/XXXXXXXXXXX/
-instagram> download stories lupikovoleg
-instagram> download highlights lupikovoleg
-instagram> export csv latest-reels
-instagram> how many followers does lupikovoleg have?
-instagram> does @lupikovoleg have stories?
-instagram> how many likes does the latest reel have?
-instagram> who are the top followers of @lupikovoleg?
-instagram> show the last 5 reels from this profile from the last week
-instagram> show this profile's stories
-instagram> show this profile's highlights
-instagram> export that to csv
-instagram> download this reel
-instagram> download audio from this reel
-instagram> download the latest reel from this profile
-instagram> download these stories
-```
-
-## Commands
-
-- `help` — show help
-- `actions` — show available actions
-- `reel <instagram_reel_url>` — fetch reel stats
-- `search <query>` — discover profiles/media by topic with multilingual query expansion and optional freshness filtering
-- `open [url|@username|index|profile|reel]` — open a URL in the default browser
-- `profile <instagram_profile_url_or_username>` — fetch profile stats
-- `reels <instagram_profile_url_or_username> [limit] [days_back]` — fetch filtered reels
-- `stories [instagram_profile_url_or_username] [limit]` — list active stories
-- `highlights [instagram_profile_url_or_username] [limit]` — list highlight folders
-- `comments <instagram_media_url> [limit]` — fetch media comments
-- `likers <instagram_media_url> [limit]` — fetch media likers
-- `download media <instagram_media_url>` — download a reel or post
-- `download audio <instagram_media_url>` — download the audio track from a reel or post
-- `download stories [instagram_profile_url_or_username] [limit]` — download active stories
-- `download highlights [instagram_profile_url_or_username] [title_filter]` — download highlights
-- `followers <instagram_profile_url_or_username> [limit]` — fetch one follower page
-- `top-followers <instagram_profile_url_or_username> [sample_size] [top_n]` — approximate biggest followers
-- `export <csv|json> [filename_hint]` — export the most recent collection in session
-- `stats <url_or_username>` — auto-detect target type
-- `ask <question>` — ask the agent
-- `model` — show current model
-- `model <openrouter_model_id>` — switch model for current session
-- `update` — fast-forward update the local git repo if remote commits exist
-- `render` — show current output mode
-- `render <rich|plain>` — switch output mode
-- `last` — print raw JSON for latest fetched stats
-- `reload` — reload `.env`
-- `exit` / `quit` — exit
-
-## MCP Server
-
-This project also ships a local MCP server:
-
-- command: `instagram-mcp`
-- transport: `stdio`
-- runtime: uses the same local `.env` as the CLI
-
-Core MCP tools:
-
-- `search_instagram`
-- `get_profile_stats`
-- `get_reel_stats`
-- `get_recent_reels`
-- `get_profile_reels`
-- `get_followers_page`
-- `get_top_followers`
-- `get_media_comments`
-- `get_profile_stories`
-- `get_profile_highlights`
-- `get_media_likers`
-- `rank_media_likers_by_followers`
-- `get_last_reel_metric`
-- `download_media_content`
-- `download_media_audio`
-- `download_profile_stories`
-- `download_profile_highlights`
-- `read_result`
-- `export_result`
-- `list_results`
-- `server_info`
-
-Notes:
-
-- MCP v1 is stateless for targets: pass explicit usernames or media URLs to tools.
-- Most data tools return a `result_id`.
-- Use `read_result(result_id)` or `export_result(result_id, format)` for follow-up operations.
-- In MCP mode, `search_instagram` does not call OpenRouter internally.
-- For best search quality, the MCP client should pass `query_variants` with translations or synonyms when useful.
-
-### Claude Code Setup
-
-Per Anthropic MCP docs, local stdio servers can be added like this:
+Claude Code:
 
 ```bash
 claude mcp add instagram-cli -- /path/to/instagram-cli/.venv/bin/instagram-mcp
 ```
 
-If you installed the script into your `PATH`, this also works:
-
-```bash
-claude mcp add instagram-cli -- instagram-mcp
-```
-
-Then verify:
-
-```bash
-claude mcp list
-claude mcp get instagram-cli
-```
-
-### Claude Desktop Setup
-
-On macOS, Claude Desktop reads MCP server config from:
+Claude Desktop config file on macOS:
 
 ```text
 ~/Library/Application Support/Claude/claude_desktop_config.json
 ```
 
-Example config:
+Example:
 
 ```json
 {
@@ -270,187 +118,15 @@ Example config:
 }
 ```
 
-Notes:
+## Documentation
 
-- use absolute paths
-- point `INSTAGRAM_CLI_ENV_FILE` to the CLI's own `.env`
-- restart Claude Desktop after changing the config file
+- [CLI guide](docs/cli.md)
+- [MCP guide](docs/mcp.md)
+- [Architecture](docs/architecture.md)
+- [Troubleshooting and configuration](docs/troubleshooting.md)
 
-Example Claude prompts:
+## Project Notes
 
-```text
-Find today's reels about an attack on Dubai.
-How many followers does @lupikovoleg have?
-Get comments for this reel: https://www.instagram.com/reel/XXXXXXXXXXX/
-Rank likers of this reel by followers.
-Export the previous result to csv.
-Download the audio from this reel: https://www.instagram.com/reel/XXXXXXXXXXX/
-```
-
-When Claude supports passing richer tool arguments, an ideal MCP search call looks like:
-
-```json
-{
-  "query": "найди рилсы сегодняшние про атаку на дубай",
-  "query_variants": [
-    "атака на дубай",
-    "attack on Dubai",
-    "Dubai attack",
-    "взрыв в дубае"
-  ],
-  "media_only": true,
-  "today_only": true,
-  "limit": 5
-}
-```
-
-## Environment Variables
-
-Required:
-
-- `HIKERAPI_KEY` or `HIKERAPI_TOKEN`
-- `OPENROUTER_API_KEY`
-
-Optional:
-
-- `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`)
-- `OPENROUTER_CHAT_MODEL` (default: `google/gemini-3-flash-preview`)
-- `OPENROUTER_ANALYSIS_MODEL`
-- `OPENROUTER_VISION_MODEL`
-- `OPENROUTER_HTTP_REFERER`
-- `OPENROUTER_APP_TITLE`
-- `HIKERAPI_BASE_URL` (default: `https://api.instagrapi.com`)
-- `PROXY_URL`
-- `PROXY_SOCKS5_URL`
-- `DEBUG`
-
-## Architecture
-
-- HikerAPI provides raw Instagram stats.
-- OpenRouter agent runs with tool calling:
-  - `search_instagram`
-  - `get_profile_stats`
-  - `get_reel_stats`
-  - `get_recent_reels`
-  - `get_profile_reels`
-  - `get_profile_stories`
-  - `get_profile_highlights`
-  - `get_followers_page`
-  - `get_top_followers`
-  - `get_media_comments`
-  - `download_media_content`
-  - `download_media_audio`
-  - `download_profile_stories`
-  - `download_profile_highlights`
-  - `get_media_likers`
-  - `rank_media_likers_by_followers`
-  - `get_last_reel_metric`
-  - `export_session_data`
-  - `get_session_context`
-- MCP server runs on the same capability layer through `instagram_cli.ops.InstagramOps`.
-- Search flow is hybrid:
-  - the agent/tool normalizes the user topic
-  - builds original + English + short keyword variants
-  - runs multiple `/gql/topsearch` queries
-  - merges and deduplicates results
-  - keeps only media when the user asks for reels/posts
-  - enriches media timestamps and filters by `today` / `last N days` when freshness matters
-- In MCP mode, the server keeps the same deterministic merge/dedupe/filter pipeline, but query expansion should come from the MCP client via `query_variants`.
-- For simple direct input (single URL or username), CLI can call stats endpoints directly.
-
-## Repo Updates
-
-- On startup, the CLI checks whether the local git repo is behind its upstream branch.
-- If new commits exist, the banner shows an update notice.
-- To update safely, run:
-
-```text
-update
-```
-
-Behavior:
-
-- uses `git pull --ff-only`
-- refuses to update if the working tree is dirty
-- refuses automatic update if the branch diverged
-
-## Natural-Language Patterns
-
-The agent is configured to handle follow-up context such as:
-
-- `search portugal creators`
-- `find reels about an attack on Dubai`
-- `find today's reels about an attack on Dubai`
-- `open 1`
-- `show the last 5 reels from this profile from the last week`
-- `show this profile's stories`
-- `show this profile's highlights`
-- `export that to csv`
-- `show comments for this post`
-- `who liked this reel?`
-- `rank those likers by followers`
-- `download this reel`
-- `download audio from this reel`
-- `download the latest reel from this profile`
-- `download these stories`
-- `download highlights for this profile`
-
-When the target is omitted, the CLI uses current session context first:
-
-- current search results
-- current profile
-- current reel / media
-- recent reels
-- last fetched collection
-- last download result
-
-## Downloads
-
-Downloaded files are stored under:
-
-- `/path/to/instagram-cli/output/downloads/`
-
-Each download run creates:
-
-- a timestamped directory
-- the saved media files
-- `metadata.json` with the source plan and file paths
-
-Notes:
-
-- Reels and posts are downloaded from media payload URLs.
-- Audio download uses a direct track URL from the media payload when available.
-- Stories are downloaded from the active stories feed.
-- Highlights are resolved in two steps:
-  - `/v1/user/highlights` for folders
-  - `/v1/highlight/by/id` for highlight items
-
-## Follower Cost Control
-
-- Default follower-page strategy: `/g2/user/followers`
-- `top-followers` is intentionally approximate:
-  - it samples a bounded subset of followers
-  - then enriches only that subset with profile lookups
-  - it reports the request budget used
-- This avoids accidental full follower crawls that could burn HikerAPI credits.
-- Ranked media likers by follower count can also be expensive because every liker profile must be enriched.
-- If you need full-account follower ranking, build it as an explicit batch/export job, not as an open-ended chat request.
-
-## Troubleshooting
-
-- `OpenRouter is not configured...`
-  - check `OPENROUTER_API_KEY` in local `.env`
-- `HIKERAPI_TOKEN or HIKERAPI_KEY is missing`
-  - check `HIKERAPI_KEY` / `HIKERAPI_TOKEN`
-- `rich` rendering does not appear
-  - run `render plain` to force plain output
-  - ensure you are in interactive TTY (not piping stdin)
-- Target parsing is wrong
-  - use explicit commands: `profile ...` or `reel ...`
-  - for filtered reel analysis use `reels ...`
-  - for audience data use `comments ...` or `likers ...`
-
-## Security Notes
-
-- Do not commit `.env` with real secrets.
-- Use separate restricted keys for CI/production.
+- CLI mode uses OpenRouter for natural-language tool selection and query expansion.
+- MCP mode does not use OpenRouter internally for search. MCP clients should pass `query_variants` when richer multilingual retrieval is needed.
+- Expensive follower and liker analysis is intentionally capped by default to avoid burning HikerAPI credits.
