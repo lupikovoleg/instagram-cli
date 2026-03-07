@@ -1,6 +1,6 @@
 # Instagram CLI
 
-Terminal-first Instagram analytics, downloads, and MCP tools powered.
+Terminal-first Instagram analytics, downloads, and MCP tools powered by HikerAPI, OpenRouter, and FastMCP.
 
 ```text
  ___ _   _ ____ _____  _    ____ ____      _    __  __      ____ _     ___
@@ -15,11 +15,18 @@ Terminal-first Instagram analytics, downloads, and MCP tools powered.
 
 - Search Instagram by topic, including multilingual reel and media discovery
 - Filter search results by freshness, including `today` and `last N days`
-- Fetch profile stats, reel stats, comments, likers, followers, stories, and highlights
+- Fetch profile stats, reel stats, comments, likers, followers, following, stories, and highlights
 - Analyze profile publications from the main grid:
   - reels
   - posts
   - carousels
+- Inspect pinned posts, tagged publications, comment replies, tagged users, and media insight metrics
+- Discover content and entities through:
+  - hashtags
+  - places
+  - music tracks
+  - suggested related profiles
+- Check HikerAPI balance and request-rate data from the CLI or MCP
 - Download Instagram content locally:
   - reels and posts
   - audio tracks
@@ -130,3 +137,4 @@ Example:
 - CLI mode uses OpenRouter for natural-language tool selection and query expansion.
 - MCP mode does not use OpenRouter internally for search. MCP clients should pass `query_variants` when richer multilingual retrieval is needed.
 - Expensive follower and liker analysis is intentionally capped by default to avoid burning HikerAPI credits.
+- Some tools are exact page reads, while sampled ranking tools explicitly mark themselves as approximate.

@@ -55,6 +55,10 @@ def _mcp_instructions() -> str:
     "This server is stateless for targets: pass explicit usernames or media URLs to tools. "
     "For search_instagram, the MCP client may supply query_variants with translations or synonyms. "
     "The server does not use OpenRouter internally for MCP search expansion. "
+    "For profile reels or publications beyond the single-call collection limit, use the cursor-based page tools and continue with next_page_id. "
+    "Treat tools as exact unless the payload explicitly says approximate=true or includes an approximation_note/limitation. "
+    "For comments, get_media_comments and get_media_comments_page return root comments only; use get_comment_replies for nested replies when the task requires full thread depth. "
+    "Use hashtag, place, music, tagged, pinned, following, and suggested-profile tools instead of generic search when the user intent clearly matches those entities. "
     "Most tools return a result_id. Use read_result or export_result for follow-up actions on that stored result."
   )
 
@@ -110,11 +114,22 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
         "reel_stats": True,
         "profile_reels": True,
         "profile_publications": True,
+        "following": True,
+        "pinned_publications": True,
+        "tagged_publications": True,
         "stories": True,
         "highlights": True,
         "comments": True,
+        "comment_replies": True,
         "likers": True,
+        "media_usertags": True,
+        "media_insight": True,
         "followers": True,
+        "balance": True,
+        "hashtags": True,
+        "places": True,
+        "music": True,
+        "suggested_profiles": True,
         "downloads": True,
         "exports": True,
       },
@@ -204,6 +219,20 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
   def get_profile_reels(target: str, limit: int = 12, days_back: int | None = None) -> dict[str, Any]:
     return safe_tool(ops.get_profile_reels)(target=target, limit=limit, days_back=days_back)
 
+  @server.tool(description="Get one cursor-based page of profile reels. Use next_page_id from a previous page to continue.")
+  def get_profile_reels_page(
+    target: str,
+    page_id: str | None = None,
+    page_size: int = 24,
+    days_back: int | None = None,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_reels_page)(
+      target=target,
+      page_id=page_id,
+      page_size=page_size,
+      days_back=days_back,
+    )
+
   @server.tool(description="Get main-grid profile publications, including reels, posts, and carousels.")
   def get_profile_publications(
     target: str,
@@ -218,9 +247,34 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
       publication_type=publication_type,
     )
 
+  @server.tool(
+    description=(
+      "Get one cursor-based page of profile publications, including reels, posts, and carousels. "
+      "Use next_page_id from a previous page to continue."
+    ),
+  )
+  def get_profile_publications_page(
+    target: str,
+    page_id: str | None = None,
+    page_size: int = 24,
+    days_back: int | None = None,
+    publication_type: str = "all",
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_publications_page)(
+      target=target,
+      page_id=page_id,
+      page_size=page_size,
+      days_back=days_back,
+      publication_type=publication_type,
+    )
+
   @server.tool(description="Get one low-cost followers page for a profile.")
   def get_followers_page(target: str, limit: int = 25, page_id: str | None = None) -> dict[str, Any]:
     return safe_tool(ops.get_followers_page)(target=target, limit=limit, page_id=page_id)
+
+  @server.tool(description="Get one page of following accounts for a profile.")
+  def get_following_page(target: str, limit: int = 25, page_id: str | None = None) -> dict[str, Any]:
+    return safe_tool(ops.get_following_page)(target=target, limit=limit, page_id=page_id)
 
   @server.tool(description="Get an approximate sampled ranking of the biggest followers by follower count.")
   def get_top_followers(
@@ -236,9 +290,55 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
       max_pages=max_pages,
     )
 
+  @server.tool(description="Search inside a profile's followers list by keyword.")
+  def search_profile_followers(target: str, query: str, force: bool | None = None) -> dict[str, Any]:
+    return safe_tool(ops.search_profile_followers)(target=target, query=query, force=force)
+
+  @server.tool(description="Search inside a profile's following list by keyword.")
+  def search_profile_following(target: str, query: str, force: bool | None = None) -> dict[str, Any]:
+    return safe_tool(ops.search_profile_following)(target=target, query=query, force=force)
+
   @server.tool(description="Get comments for an Instagram reel or post URL.")
   def get_media_comments(media_url: str, limit: int = 20) -> dict[str, Any]:
     return safe_tool(ops.get_media_comments)(media_url=media_url, limit=limit)
+
+  @server.tool(description="Get one paginated page of root comments for an Instagram reel or post URL.")
+  def get_media_comments_page(
+    media_url: str,
+    page_id: str | None = None,
+    page_size: int = 15,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_media_comments_page)(media_url=media_url, page_id=page_id, page_size=page_size)
+
+  @server.tool(description="Get nested replies for a specific comment on a reel or post.")
+  def get_comment_replies(
+    comment_id: str,
+    media_url: str,
+    page_id: str | None = None,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_comment_replies)(comment_id=comment_id, media_url=media_url, page_id=page_id)
+
+  @server.tool(description="Get users who liked a specific comment.")
+  def get_comment_likers(
+    comment_id: str,
+    media_id: str | None = None,
+    page_id: str | None = None,
+    limit: int = 20,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_comment_likers)(
+      comment_id=comment_id,
+      media_id=media_id,
+      page_id=page_id,
+      limit=limit,
+    )
+
+  @server.tool(description="Get users tagged in an Instagram reel or post.")
+  def get_media_usertags(media_url: str) -> dict[str, Any]:
+    return safe_tool(ops.get_media_usertags)(media_url=media_url)
+
+  @server.tool(description="Get deeper insight metrics for an Instagram reel or post.")
+  def get_media_insight(media_url: str) -> dict[str, Any]:
+    return safe_tool(ops.get_media_insight)(media_url=media_url)
 
   @server.tool(description="List active stories for a profile.")
   def get_profile_stories(target: str, limit: int = 0) -> dict[str, Any]:
@@ -248,9 +348,84 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
   def get_profile_highlights(target: str, limit: int = 0) -> dict[str, Any]:
     return safe_tool(ops.get_profile_highlights)(target=target, limit=limit)
 
+  @server.tool(description="Get pinned publications for a profile.")
+  def get_profile_pinned_publications(target: str, limit: int = 12) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_pinned_publications)(target=target, limit=limit)
+
+  @server.tool(description="Get publications where a profile is tagged.")
+  def get_profile_tagged_publications(target: str, limit: int = 12) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_tagged_publications)(target=target, limit=limit)
+
+  @server.tool(description="Get one cursor-based page of publications where a profile is tagged.")
+  def get_profile_tagged_publications_page(
+    target: str,
+    page_id: str | None = None,
+    page_size: int = 24,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_tagged_publications_page)(
+      target=target,
+      page_id=page_id,
+      page_size=page_size,
+    )
+
   @server.tool(description="Get a preview list of users who liked an Instagram reel or post.")
   def get_media_likers(media_url: str, limit: int = 20) -> dict[str, Any]:
     return safe_tool(ops.get_media_likers)(media_url=media_url, limit=limit)
+
+  @server.tool(description="Get the current HikerAPI balance and request rate.")
+  def get_system_balance() -> dict[str, Any]:
+    return safe_tool(ops.get_system_balance)()
+
+  @server.tool(description="Get metadata for an Instagram hashtag.")
+  def get_hashtag_info(name: str) -> dict[str, Any]:
+    return safe_tool(ops.get_hashtag_info)(name=name)
+
+  @server.tool(description="Get reels for an Instagram hashtag.")
+  def get_hashtag_reels(name: str, limit: int = 12) -> dict[str, Any]:
+    return safe_tool(ops.get_hashtag_reels)(name=name, limit=limit)
+
+  @server.tool(description="Search Instagram places by query.")
+  def search_places(
+    query: str,
+    lat: float | None = None,
+    lng: float | None = None,
+    limit: int = 20,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.search_places)(query=query, lat=lat, lng=lng, limit=limit)
+
+  @server.tool(description="Get recent media for an Instagram location id.")
+  def get_location_recent_media(location_pk: int, limit: int = 12) -> dict[str, Any]:
+    return safe_tool(ops.get_location_recent_media)(location_pk=location_pk, limit=limit)
+
+  @server.tool(description="Search Instagram music/audio tracks by query.")
+  def search_music(query: str, limit: int = 10) -> dict[str, Any]:
+    return safe_tool(ops.search_music)(query=query, limit=limit)
+
+  @server.tool(description="Get media using a specific Instagram track id.")
+  def get_track_media(
+    track_id: str,
+    page_id: str | None = None,
+    limit: int = 12,
+    stream: bool = False,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_track_media)(
+      track_id=track_id,
+      page_id=page_id,
+      limit=limit,
+      stream=stream,
+    )
+
+  @server.tool(description="Get suggested profiles related to a profile.")
+  def get_profile_suggestions(
+    target: str,
+    expand_suggestion: bool = False,
+    limit: int = 20,
+  ) -> dict[str, Any]:
+    return safe_tool(ops.get_profile_suggestions)(
+      target=target,
+      expand_suggestion=expand_suggestion,
+      limit=limit,
+    )
 
   @server.tool(description="Build a ranking of media likers sorted by follower count.")
   def rank_media_likers_by_followers(media_urls: list[str], top_n: int = 100) -> dict[str, Any]:

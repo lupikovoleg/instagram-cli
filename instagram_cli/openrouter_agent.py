@@ -5,6 +5,7 @@ import re
 from typing import Any, Callable
 
 from instagram_cli.config import Settings
+from instagram_cli.limits import MAX_PROFILE_COLLECTION_ITEMS
 
 try:
   from openai import OpenAI
@@ -60,8 +61,15 @@ class OpenRouterAgent:
       "search_instagram already expands queries across languages and keyword variants, so pass the user's topic cleanly instead of manually listing variants in your answer. "
       "If the user gives profile URL/username, use get_profile_stats, get_recent_reels, or get_profile_reels. "
       "If the user asks about profile publications, posts, main-grid content, or carousels, use get_profile_publications. "
+      "If the user asks about pinned posts, use get_profile_pinned_publications. "
+      "If the user asks about tagged posts or media where the account is tagged, use get_profile_tagged_publications or get_profile_tagged_publications_page. "
+      "If the user asks to continue, fetch the next page, or analyze more than 200 profile reels/publications, use the cursor-based page tools get_profile_reels_page or get_profile_publications_page. "
+      "For page tools, start with page_id omitted for the first page, then continue using next_page_id from the previous tool result. "
+      "Keep page_size conservative and stop once you have enough items for the user's request. "
       "If the user asks for the latest or last carousel/post/publication, use get_profile_publications with limit=1 and the appropriate publication_type. "
       "If the user asks to analyze a profile's publications, inspect get_profile_publications rather than only reels. "
+      f"For get_recent_reels, get_profile_reels, and get_profile_publications, you can request up to {MAX_PROFILE_COLLECTION_ITEMS} items when the user explicitly asks for deeper analysis. "
+      "Do not claim those tools are limited to 20 items. "
       "If the user gives reel or post URL, use get_reel_stats, get_media_comments, or get_media_likers as needed. "
       "If the user asks to list stories, use get_profile_stories. "
       "If the user asks to list highlights, use get_profile_highlights. "
@@ -70,12 +78,25 @@ class OpenRouterAgent:
       "Do not claim that you can classify reels into trial/main modes, because this CLI does not support that reliably. "
       "If the user asks about trial reels or main reels, say that this classification is currently unsupported and offer recent reels by date instead. "
       "If the user asks to list followers or inspect follower pages, use get_followers_page first. "
+      "If the user asks to list following, inspect who the account follows, or continue through following pages, use get_following_page. "
+      "If the user asks to search within followers or following for a keyword, use search_profile_followers or search_profile_following instead of broad crawling. "
       "If the user asks for biggest/top followers, use get_top_followers. "
       "When using get_top_followers, explicitly say the ranking is approximate and sampled to control API spend. "
       "Keep follower queries conservative by default: use one page and a small sample unless the user explicitly asks for deeper coverage. "
       "If the user asks who liked a post/reel, use get_media_likers. "
       "If the user asks for top/ranked likers by follower count, use rank_media_likers_by_followers, and mention if the liker list may be capped. "
       "If the user asks for comments, commenters, or top comments, start with get_media_comments. "
+      "Treat get_media_comments and get_media_comments_page as root-comments-only tools unless replies are loaded explicitly. "
+      "If the user asks for replies, nested comments, or thread depth, use get_comment_replies. "
+      "If the user asks who liked a comment, use get_comment_likers. "
+      "Only call something approximate when the tool result explicitly says approximate=true or includes an approximation_note/limitation. "
+      "If the user asks who is tagged in a post/reel, use get_media_usertags. "
+      "If the user asks for deeper performance metrics or insight on a post/reel, use get_media_insight. "
+      "If the user asks about remaining balance, request budget, or API credits, use get_system_balance. "
+      "If the user asks about a hashtag, use get_hashtag_info or get_hashtag_reels instead of generic search. "
+      "If the user asks about a place or location, use search_places first and then get_location_recent_media. "
+      "If the user asks about music, sound, audio, or a track, use search_music first and then get_track_media for media using that track. "
+      "If the user asks for related or suggested profiles, use get_profile_suggestions. "
       "If the user asks to download this reel/post, use download_media_content. "
       "If the user asks to download audio from a reel/post, use download_media_audio. "
       "If the user asks to download the latest or last reel for a profile, first load it with get_profile_reels(limit=1), then use download_media_content without a URL. "

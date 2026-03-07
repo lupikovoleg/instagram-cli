@@ -70,9 +70,20 @@ The capability layer supports:
 - reel stats
 - stories and highlights
 - comments
+- comment replies
+- comment likers
 - likers
 - followers pages
+- following pages
 - approximate top followers
+- pinned publications
+- tagged publications
+- media usertags
+- media insight
+- hashtag discovery
+- place discovery
+- music discovery
+- suggested related profiles
 - downloads
 - main-grid publications
 
@@ -107,11 +118,13 @@ Examples:
 - follower ranking is sampled and capped
 - liker ranking enriches bounded sets unless the caller explicitly asks for larger jobs
 - freshness enrichment only runs when the request requires time filtering
+- root comments and nested replies are split into separate tools so the caller can control cost and depth
 
 This is intentional. Exact large-scale scans should be implemented as explicit batch jobs with budgeting, progress reporting, and resume support.
 
 ## Known Limits
 
 - comment totals can include threaded replies even when a root-comments endpoint returns fewer items
+- `approximate` means sampled or capped on purpose to control spend; `exact` means a direct page read or complete result for the requested tool scope
 - trial-reel classification is intentionally unsupported because the current HikerAPI signals are not reliable enough
 - some downloads depend on whether Instagram payloads expose direct media URLs

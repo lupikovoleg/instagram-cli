@@ -15,6 +15,9 @@ The session keeps short-lived context so follow-up prompts can refer to:
 - the current reel or post
 - the latest publications or reels list
 - the latest search results
+- the latest followers/following pages
+- the latest comments roots/replies result
+- the latest hashtag/place/music discovery result
 - the latest exportable collection
 - the latest download result
 
@@ -44,6 +47,7 @@ Collections:
 - `publications <instagram_profile_url_or_username> [limit] [days_back] [all|reels|posts|carousels]` - fetch profile publications from the main grid
 - `stories [instagram_profile_url_or_username] [limit]` - list active stories
 - `highlights [instagram_profile_url_or_username] [limit]` - list highlight folders
+- advanced profile and discovery flows such as pinned posts, tagged posts, following, hashtag reels, places, tracks, suggestions, and balance are currently best accessed through natural language
 
 Audience data:
 
@@ -93,6 +97,18 @@ Media audience:
 - `Show comments for this reel`
 - `Who liked this post?`
 - `Rank those likers by followers`
+- `Search this profile's following for travel`
+- `Show pinned posts from this profile`
+- `Show tagged posts for this profile`
+- `Show replies to the first comment on this post`
+- `Who liked that comment?`
+- `Who is tagged in this reel?`
+- `Show deeper insight metrics for this reel`
+- `Show reels for hashtag dubai`
+- `Search places in Dubai`
+- `Search Instagram music for dubai`
+- `Show suggested profiles for this account`
+- `Show HikerAPI balance`
 
 Downloads and exports:
 
@@ -141,6 +157,24 @@ Current supported content:
 - audio tracks when the media payload exposes a direct downloadable track URL
 - active stories
 - highlights
+
+## Exact vs Approximate
+
+Use this distinction when interpreting answers:
+
+- `exact`:
+  - profile stats
+  - reel or post stats
+  - followers or following pages
+  - pinned publications
+  - tagged publications pages
+  - stories and highlights
+  - hashtag, place, and music lookups
+- `approximate`:
+  - sampled follower rankings such as `top-followers`
+  - any capped liker-based ranking where the upstream liker list is incomplete
+
+Approximate results should say so explicitly in the response payload or assistant answer.
 
 ## Update Checks
 

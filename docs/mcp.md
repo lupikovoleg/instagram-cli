@@ -48,12 +48,31 @@ Current core tools:
 - `get_recent_reels`
 - `get_profile_reels`
 - `get_profile_publications`
+- `get_profile_pinned_publications`
+- `get_profile_tagged_publications`
+- `get_profile_tagged_publications_page`
 - `get_followers_page`
+- `get_following_page`
 - `get_top_followers`
+- `search_profile_followers`
+- `search_profile_following`
 - `get_media_comments`
+- `get_media_comments_page`
+- `get_comment_replies`
+- `get_comment_likers`
+- `get_media_usertags`
+- `get_media_insight`
 - `get_profile_stories`
 - `get_profile_highlights`
 - `get_media_likers`
+- `get_system_balance`
+- `get_hashtag_info`
+- `get_hashtag_reels`
+- `search_places`
+- `get_location_recent_media`
+- `search_music`
+- `get_track_media`
+- `get_profile_suggestions`
 - `rank_media_likers_by_followers`
 - `get_last_reel_metric`
 - `download_media_content`
@@ -76,6 +95,34 @@ Use follow-up tools for persisted results:
 - `list_results()`
 
 This keeps MCP interactions explicit and avoids depending on terminal session memory.
+
+## Exact vs Approximate in MCP
+
+Treat MCP tool results as exact unless the payload explicitly says otherwise.
+
+- exact examples:
+  - `get_followers_page`
+  - `get_following_page`
+  - `get_profile_pinned_publications`
+  - `get_profile_tagged_publications_page`
+  - `get_media_comments_page`
+- approximate examples:
+  - `get_top_followers`
+  - ranked liker flows when the payload includes a cap or limitation note
+
+## Comments Completeness
+
+Comments are not one flat dataset.
+
+- `get_media_comments` and `get_media_comments_page` return root comments
+- `get_comment_replies` loads nested replies for one root comment
+- total media comment count can be greater than the number of returned root comments
+
+If the client needs full thread depth, it should:
+
+1. fetch root comments
+2. select root comment ids
+3. call `get_comment_replies` for the needed threads
 
 ## Search Behavior in MCP
 
@@ -170,6 +217,18 @@ Notes:
 - `Show the last 10 publications from @lupikovoleg.`
 - `Show the latest carousels from @lupikovoleg.`
 - `Get comments for this reel: https://www.instagram.com/reel/XXXXXXXXXXX/`
+- `Get one page of following for @username.`
+- `Search this profile's followers for coffee accounts.`
+- `Show pinned posts for @username.`
+- `Show media where @username is tagged.`
+- `Show replies for comment 123 on this post: https://www.instagram.com/p/XXXXXXXXXXX/`
+- `Who is tagged in this reel: https://www.instagram.com/reel/XXXXXXXXXXX/`
+- `Show deeper insight metrics for this reel.`
+- `Show reels for hashtag dubai.`
+- `Search places in Dubai and then show recent media for the first place.`
+- `Search Instagram music for dubai and then show media for the first track.`
+- `Show suggested profiles related to @username.`
+- `Show the current HikerAPI balance.`
 - `Rank likers of this reel by followers.`
 - `Export the previous result to csv.`
 - `Download the audio from this reel: https://www.instagram.com/reel/XXXXXXXXXXX/`

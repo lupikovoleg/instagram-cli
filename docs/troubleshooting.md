@@ -68,6 +68,11 @@ This does not automatically mean the API truncated the response. It can simply m
 
 Treat root comment lists and total comment counts as different things.
 
+Use this rule of thumb:
+
+- `comments_completeness = roots_only` means you still need reply calls for full thread depth
+- `comments_completeness = thread_replies` means you are looking at one reply thread under a parent comment
+
 ## Cost and Scope Caveat
 
 Large follower or liker analysis can become very expensive.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from math import ceil
 import re
 import time
 from datetime import datetime, timezone
@@ -11,6 +12,12 @@ from urllib.parse import urlparse
 import requests
 
 from instagram_cli.config import Settings
+from instagram_cli.limits import (
+  MAX_DAYS_BACK,
+  MAX_PROFILE_COLLECTION_ITEMS,
+  MAX_PROFILE_COLLECTION_PAGES,
+  MAX_PROFILE_COLLECTION_PAGE_SIZE,
+)
 
 
 class HikerApiError(RuntimeError):
@@ -274,6 +281,7 @@ def _normalize_media_comment_payload(comment: dict[str, Any]) -> dict[str, Any]:
     "comment_id": comment_id,
     "text": _as_str(comment.get("text")),
     "like_count": _as_int(comment.get("comment_like_count") or comment.get("like_count")),
+    "reply_count": _as_int(comment.get("child_comment_count") or comment.get("preview_child_comments_count")),
     "created_at_utc": created_at_utc,
     "created_at_local": created_at_local,
     "user_id": user_id,
@@ -283,6 +291,27 @@ def _normalize_media_comment_payload(comment: dict[str, Any]) -> dict[str, Any]:
     "is_verified": bool(user.get("is_verified")),
     "parent_comment_id": _as_str(comment.get("parent_comment_id")),
     "raw": comment,
+  }
+
+
+def _normalize_user_preview(user: dict[str, Any], *, source: str, entity_type: str = "user_preview") -> dict[str, Any]:
+  user_id = user.get("pk") or user.get("id")
+  social_context = user.get("social_context") if isinstance(user.get("social_context"), dict) else None
+  return {
+    "entity_type": entity_type,
+    "user_id": str(user_id) if user_id is not None else None,
+    "username": _as_str(user.get("username")),
+    "full_name": _as_str(user.get("full_name")),
+    "is_private": bool(user.get("is_private")),
+    "is_verified": bool(user.get("is_verified")),
+    "followers": _as_int(user.get("follower_count") or user.get("followers")),
+    "following": _as_int(user.get("following_count") or user.get("following")),
+    "posts": _as_int(user.get("media_count") or user.get("posts")),
+    "profile_pic_url": _as_str(user.get("profile_pic_url")),
+    "profile_pic_id": _as_str(user.get("profile_pic_id")),
+    "social_context": social_context,
+    "source_endpoint": source,
+    "raw": user,
   }
 
 
@@ -327,6 +356,103 @@ def _normalize_topsearch_item(item: dict[str, Any]) -> dict[str, Any]:
     "search_serp_type": item.get("search_serp_type"),
     "id": _as_str(item.get("id") or item.get("pk") or item.get("strong_id__")),
     "raw": item,
+  }
+
+
+def _normalize_place_payload(place: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "entity_type": "place_preview",
+    "location_pk": _as_int(place.get("pk")),
+    "name": _as_str(place.get("name") or place.get("title")),
+    "address": _as_str(place.get("address") or place.get("subtitle")),
+    "city": _as_str(place.get("city")),
+    "category": _as_str(place.get("category")),
+    "lat": place.get("lat") or _nested_get(place.get("location"), "lat"),
+    "lng": place.get("lng") or _nested_get(place.get("location"), "lng"),
+    "external_id": _as_str(place.get("external_id")),
+    "website": _as_str(place.get("website")),
+    "phone": _as_str(place.get("phone")),
+    "raw": place,
+  }
+
+
+def _normalize_music_track_payload(track: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "entity_type": "music_track",
+    "track_id": _as_str(track.get("id") or track.get("audio_cluster_id")),
+    "audio_asset_id": _as_str(track.get("audio_asset_id")),
+    "title": _as_str(track.get("title")),
+    "artist": _as_str(track.get("display_artist") or track.get("artist_name")),
+    "subtitle": _as_str(track.get("subtitle")),
+    "duration_ms": _as_int(track.get("duration_in_ms")),
+    "allows_saving": bool(track.get("allows_saving")),
+    "is_explicit": bool(track.get("is_explicit")),
+    "cover_artwork_url": _as_str(track.get("cover_artwork_uri")),
+    "cover_artwork_thumbnail_url": _as_str(track.get("cover_artwork_thumbnail_uri")),
+    "progressive_download_url": _as_str(track.get("progressive_download_url")),
+    "fast_start_progressive_download_url": _as_str(track.get("fast_start_progressive_download_url")),
+    "reactive_audio_download_url": _as_str(track.get("reactive_audio_download_url")),
+    "raw": track,
+  }
+
+
+def _normalize_usertag_payload(tag: dict[str, Any]) -> dict[str, Any]:
+  user = tag.get("user") if isinstance(tag.get("user"), dict) else {}
+  position = tag.get("position")
+  x = None
+  y = None
+  if isinstance(position, list) and len(position) >= 2:
+    x = position[0]
+    y = position[1]
+  elif isinstance(position, dict):
+    x = position.get("x")
+    y = position.get("y")
+  return {
+    "entity_type": "media_usertag",
+    "user_id": _as_str(user.get("pk") or user.get("id")),
+    "username": _as_str(user.get("username")),
+    "full_name": _as_str(user.get("full_name")),
+    "is_private": bool(user.get("is_private")),
+    "is_verified": bool(user.get("is_verified")),
+    "x": x,
+    "y": y,
+    "raw": tag,
+  }
+
+
+def _normalize_hashtag_payload(hashtag: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "entity_type": "hashtag",
+    "hashtag_id": _as_str(hashtag.get("id")),
+    "name": _as_str(hashtag.get("name")),
+    "media_count": _as_int(hashtag.get("media_count")),
+    "profile_pic_url": _as_str(hashtag.get("profile_pic_url")),
+    "allow_following": bool(hashtag.get("allow_following")),
+    "raw": hashtag,
+  }
+
+
+def _normalize_media_insight_payload(insight: dict[str, Any], *, media: dict[str, Any]) -> dict[str, Any]:
+  creation_ts = _timestamp_from_any(insight.get("creation_time"))
+  created_at_utc, created_at_local = _format_datetime(creation_ts)
+  shopping = insight.get("shopping_product_insights") if isinstance(insight.get("shopping_product_insights"), dict) else {}
+  return {
+    "entity_type": "media_insight",
+    "media": media,
+    "media_id": _as_str(insight.get("instagram_media_id") or insight.get("id")),
+    "media_owner_id": _as_str(insight.get("instagram_media_owner_id")),
+    "instagram_media_type": _as_str(insight.get("instagram_media_type")),
+    "created_at_utc": created_at_utc,
+    "created_at_local": created_at_local,
+    "like_count": _as_int(insight.get("like_count")),
+    "comment_count": _as_int(insight.get("comment_count")),
+    "save_count": _as_int(insight.get("save_count")),
+    "shopping_outbound_click_count": _as_int(insight.get("shopping_outbound_click_count")),
+    "shopping_product_click_count": _as_int(insight.get("shopping_product_click_count")),
+    "shopping_product_by_tag_click_count": _as_int(shopping.get("shopping_product_by_tag_click_count")),
+    "shopping_product_by_tag_outbound_click_count": _as_int(shopping.get("shopping_product_by_tag_outbound_click_count")),
+    "inline_insights_node": insight.get("inline_insights_node"),
+    "raw": insight,
   }
 
 
@@ -448,11 +574,13 @@ class HikerApiClient:
     self._user_cache_by_username: dict[str, dict[str, Any]] = {}
     self._user_cache_by_id: dict[str, dict[str, Any]] = {}
     self._followers_page_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+    self._following_page_cache: dict[tuple[str, str], dict[str, Any]] = {}
     self._media_info_cache: dict[str, dict[str, Any]] = {}
     self._media_likers_cache: dict[str, dict[str, Any]] = {}
     self._media_comments_cache: dict[str, dict[str, Any]] = {}
     self._clips_chunk_cache: dict[tuple[str, str, int], tuple[list[dict[str, Any]], str | None]] = {}
     self._medias_chunk_cache: dict[tuple[str, str, int], tuple[list[dict[str, Any]], str | None]] = {}
+    self._tagged_page_cache: dict[tuple[str, str], dict[str, Any]] = {}
     self._stories_cache: dict[str, list[dict[str, Any]]] = {}
     self._highlights_cache: dict[str, list[dict[str, Any]]] = {}
     self._highlight_detail_cache: dict[str, dict[str, Any]] = {}
@@ -538,20 +666,10 @@ class HikerApiClient:
 
   @staticmethod
   def _normalize_follower_preview(user: dict[str, Any], *, source: str) -> dict[str, Any]:
-    user_id = user.get("pk") or user.get("id")
     reel = user.get("reel") if isinstance(user.get("reel"), dict) else None
-    return {
-      "entity_type": "follower_preview",
-      "user_id": str(user_id) if user_id is not None else None,
-      "username": _as_str(user.get("username")),
-      "full_name": _as_str(user.get("full_name")),
-      "is_private": bool(user.get("is_private")),
-      "is_verified": bool(user.get("is_verified")),
-      "profile_pic_url": _as_str(user.get("profile_pic_url")),
-      "has_story_ring": reel is not None,
-      "source_endpoint": source,
-      "raw": user,
-    }
+    normalized = _normalize_user_preview(user, source=source, entity_type="follower_preview")
+    normalized["has_story_ring"] = reel is not None
+    return normalized
 
   def _cache_user(self, user: dict[str, Any]) -> dict[str, Any]:
     username = _as_str(user.get("username"))
@@ -750,8 +868,10 @@ class HikerApiClient:
         "returned_count": len(normalized_comments),
         "available_comment_count": _as_int(media.get("comment_count")),
         "is_capped": len(normalized_comments) < _as_int(media.get("comment_count")),
+        "comments_completeness": "roots_only",
+        "replies_loaded": False,
         "cap_note": (
-          "HikerAPI media comments endpoint may return a capped list instead of all comments."
+          "This response contains root comments only. Total comment count may also include nested replies."
           if len(normalized_comments) < _as_int(media.get("comment_count")) else None
         ),
       }
@@ -931,6 +1051,117 @@ class HikerApiClient:
           on_progress(completed, total)
     return enriched
 
+  def _clips_chunk_page(
+    self,
+    user_id: str,
+    *,
+    page_id: str | None,
+    page_size: int,
+  ) -> tuple[list[dict[str, Any]], str | None]:
+    cache_key = (str(user_id), (page_id or "").strip(), page_size)
+    cached_page = self._clips_chunk_cache.get(cache_key)
+    if cached_page is None:
+      raw_payload = self._request(
+        "/v1/user/clips/chunk",
+        {
+          "user_id": str(user_id),
+          "end_cursor": (page_id or "").strip() or None,
+          "page_size": page_size,
+        },
+      )
+      if not isinstance(raw_payload, list) or len(raw_payload) != 2:
+        raise HikerApiError("Unexpected HikerAPI response format for user clips chunk.")
+      raw_items = raw_payload[0] if isinstance(raw_payload[0], list) else []
+      raw_cursor = _as_str(raw_payload[1])
+      cached_page = ([item for item in raw_items if isinstance(item, dict)], raw_cursor)
+      self._clips_chunk_cache[cache_key] = cached_page
+    return cached_page
+
+  def _medias_chunk_page(
+    self,
+    user_id: str,
+    *,
+    page_id: str | None,
+    page_size: int,
+  ) -> tuple[list[dict[str, Any]], str | None]:
+    cache_key = (str(user_id), (page_id or "").strip(), page_size)
+    cached_page = self._medias_chunk_cache.get(cache_key)
+    if cached_page is None:
+      raw_payload = self._request(
+        "/v1/user/medias/chunk",
+        {
+          "user_id": str(user_id),
+          "end_cursor": (page_id or "").strip() or None,
+          "page_size": page_size,
+        },
+      )
+      if not isinstance(raw_payload, list) or len(raw_payload) != 2:
+        raise HikerApiError("Unexpected HikerAPI response format for user medias chunk.")
+      raw_items = raw_payload[0] if isinstance(raw_payload[0], list) else []
+      raw_cursor = _as_str(raw_payload[1])
+      cached_page = ([item for item in raw_items if isinstance(item, dict)], raw_cursor)
+      self._medias_chunk_cache[cache_key] = cached_page
+    return cached_page
+
+  def profile_reels_page(
+    self,
+    target: str,
+    *,
+    page_id: str | None = None,
+    page_size: int = MAX_PROFILE_COLLECTION_PAGE_SIZE,
+    days_back: int | None = None,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    requested_page_size = max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE))
+    page_token = (page_id or "").strip() or None
+    cutoff_ts: int | None = None
+    requested_days_back: int | None = None
+    if days_back is not None:
+      requested_days_back = max(1, min(days_back, MAX_DAYS_BACK))
+      cutoff_ts = int(time.time() - (requested_days_back * 86400))
+
+    page_items, next_page_id = self._clips_chunk_page(
+      str(user_id),
+      page_id=page_token,
+      page_size=requested_page_size,
+    )
+
+    stop_for_cutoff = False
+    reels: list[dict[str, Any]] = []
+    for item in page_items:
+      normalized = _normalize_reel_payload(item)
+      normalized["entity_type"] = "reel_preview"
+      taken_at_ts = int(normalized.get("taken_at_ts") or 0)
+      if cutoff_ts is not None and taken_at_ts and taken_at_ts < cutoff_ts:
+        stop_for_cutoff = True
+        continue
+      reels.append(normalized)
+
+    reels.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+
+    return {
+      "entity_type": "profile_reels_page",
+      "username": _as_str(user.get("username")) or username,
+      "user_id": str(user_id),
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "reels": reels,
+      "count": len(reels),
+      "page_id": page_token,
+      "page_size": requested_page_size,
+      "next_page_id": None if stop_for_cutoff else next_page_id,
+      "filters": {
+        "days_back": requested_days_back,
+      },
+      "scanned_reels": len(page_items),
+      "source_endpoint": "/v1/user/clips/chunk",
+      "stop_reason": "days_back_cutoff" if stop_for_cutoff else None,
+    }
+
   def profile_reels(
     self,
     target: str,
@@ -946,13 +1177,14 @@ class HikerApiClient:
     if user_id is None:
       raise HikerApiError("Profile has no user_id in HikerAPI response.")
 
-    requested_limit = max(1, min(limit, 20))
-    requested_page_size = max(1, min(page_size, 24))
-    requested_max_pages = max(1, min(max_pages, 5))
+    requested_limit = max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS))
+    requested_page_size = max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE))
+    minimum_pages = max(1, ceil(requested_limit / requested_page_size))
+    requested_max_pages = max(1, min(max(max_pages, minimum_pages + 1), MAX_PROFILE_COLLECTION_PAGES))
 
     cutoff_ts: int | None = None
     if days_back is not None:
-      requested_days_back = max(1, min(days_back, 30))
+      requested_days_back = max(1, min(days_back, MAX_DAYS_BACK))
       cutoff_ts = int(time.time() - (requested_days_back * 86400))
     else:
       requested_days_back = None
@@ -964,25 +1196,11 @@ class HikerApiClient:
     seen_shortcodes: set[str] = set()
 
     while pages_used < requested_max_pages and len(reels) < requested_limit:
-      cache_key = (str(user_id), page_cursor or "", requested_page_size)
-      cached_page = self._clips_chunk_cache.get(cache_key)
-      if cached_page is None:
-        raw_payload = self._request(
-          "/v1/user/clips/chunk",
-          {
-            "user_id": str(user_id),
-            "end_cursor": page_cursor or None,
-            "page_size": requested_page_size,
-          },
-        )
-        if not isinstance(raw_payload, list) or len(raw_payload) != 2:
-          raise HikerApiError("Unexpected HikerAPI response format for user clips chunk.")
-        raw_items = raw_payload[0] if isinstance(raw_payload[0], list) else []
-        raw_cursor = _as_str(raw_payload[1])
-        cached_page = ([item for item in raw_items if isinstance(item, dict)], raw_cursor)
-        self._clips_chunk_cache[cache_key] = cached_page
-
-      page_items, next_cursor = cached_page
+      page_items, next_cursor = self._clips_chunk_page(
+        str(user_id),
+        page_id=page_cursor,
+        page_size=requested_page_size,
+      )
       pages_used += 1
       page_cursor = next_cursor
       stop_for_cutoff = False
@@ -1032,6 +1250,81 @@ class HikerApiClient:
       "source_endpoint": "/v1/user/clips/chunk",
     }
 
+  def profile_publications_page(
+    self,
+    target: str,
+    *,
+    page_id: str | None = None,
+    page_size: int = MAX_PROFILE_COLLECTION_PAGE_SIZE,
+    days_back: int | None = None,
+    publication_type: str = "all",
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    requested_page_size = max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE))
+    page_token = (page_id or "").strip() or None
+    type_text = publication_type.strip().lower()
+    if type_text not in {"all", "reels", "posts", "carousels"}:
+      raise HikerApiError("publication_type must be one of: all, reels, posts, carousels.")
+
+    cutoff_ts: int | None = None
+    requested_days_back: int | None = None
+    if days_back is not None:
+      requested_days_back = max(1, min(days_back, MAX_DAYS_BACK))
+      cutoff_ts = int(time.time() - (requested_days_back * 86400))
+
+    page_items, next_page_id = self._medias_chunk_page(
+      str(user_id),
+      page_id=page_token,
+      page_size=requested_page_size,
+    )
+
+    def matches(publication_kind: str) -> bool:
+      if type_text == "all":
+        return True
+      if type_text == "reels":
+        return publication_kind == "reel"
+      if type_text == "carousels":
+        return publication_kind == "carousel"
+      return publication_kind != "reel"
+
+    stop_for_cutoff = False
+    publications: list[dict[str, Any]] = []
+    for item in page_items:
+      normalized = _normalize_publication_payload(item)
+      taken_at_ts = int(normalized.get("taken_at_ts") or 0)
+      if cutoff_ts is not None and taken_at_ts and taken_at_ts < cutoff_ts:
+        stop_for_cutoff = True
+        continue
+      if not matches(str(normalized.get("publication_kind") or "")):
+        continue
+      publications.append(normalized)
+
+    publications.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+
+    return {
+      "entity_type": "profile_publications_page",
+      "username": _as_str(user.get("username")) or username,
+      "user_id": str(user_id),
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "publications": publications,
+      "count": len(publications),
+      "page_id": page_token,
+      "page_size": requested_page_size,
+      "next_page_id": None if stop_for_cutoff else next_page_id,
+      "filters": {
+        "days_back": requested_days_back,
+        "publication_type": type_text,
+      },
+      "scanned_publications": len(page_items),
+      "source_endpoint": "/v1/user/medias/chunk",
+      "stop_reason": "days_back_cutoff" if stop_for_cutoff else None,
+    }
+
   def profile_publications(
     self,
     target: str,
@@ -1048,16 +1341,19 @@ class HikerApiClient:
     if user_id is None:
       raise HikerApiError("Profile has no user_id in HikerAPI response.")
 
-    requested_limit = max(1, min(limit, 20))
-    requested_page_size = max(1, min(page_size, 24))
-    requested_max_pages = max(1, min(max_pages, 5))
+    requested_limit = max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS))
+    requested_page_size = max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE))
     type_text = publication_type.strip().lower()
     if type_text not in {"all", "reels", "posts", "carousels"}:
       raise HikerApiError("publication_type must be one of: all, reels, posts, carousels.")
+    minimum_pages = max(1, ceil(requested_limit / requested_page_size))
+    if type_text != "all":
+      minimum_pages *= 2
+    requested_max_pages = max(1, min(max(max_pages, minimum_pages + 1), MAX_PROFILE_COLLECTION_PAGES))
 
     cutoff_ts: int | None = None
     if days_back is not None:
-      requested_days_back = max(1, min(days_back, 30))
+      requested_days_back = max(1, min(days_back, MAX_DAYS_BACK))
       cutoff_ts = int(time.time() - (requested_days_back * 86400))
     else:
       requested_days_back = None
@@ -1078,25 +1374,11 @@ class HikerApiClient:
       return publication_kind != "reel"
 
     while pages_used < requested_max_pages and len(publications) < requested_limit:
-      cache_key = (str(user_id), page_cursor or "", requested_page_size)
-      cached_page = self._medias_chunk_cache.get(cache_key)
-      if cached_page is None:
-        raw_payload = self._request(
-          "/v1/user/medias/chunk",
-          {
-            "user_id": str(user_id),
-            "end_cursor": page_cursor or None,
-            "page_size": requested_page_size,
-          },
-        )
-        if not isinstance(raw_payload, list) or len(raw_payload) != 2:
-          raise HikerApiError("Unexpected HikerAPI response format for user medias chunk.")
-        raw_items = raw_payload[0] if isinstance(raw_payload[0], list) else []
-        raw_cursor = _as_str(raw_payload[1])
-        cached_page = ([item for item in raw_items if isinstance(item, dict)], raw_cursor)
-        self._medias_chunk_cache[cache_key] = cached_page
-
-      page_items, next_cursor = cached_page
+      page_items, next_cursor = self._medias_chunk_page(
+        str(user_id),
+        page_id=page_cursor,
+        page_size=requested_page_size,
+      )
       pages_used += 1
       page_cursor = next_cursor
       stop_for_cutoff = False
@@ -1150,7 +1432,7 @@ class HikerApiClient:
     }
 
   def recent_reels(self, target: str, limit: int = 12) -> dict[str, Any]:
-    return self.profile_reels(target, limit=limit, max_pages=2)
+    return self.profile_reels(target, limit=limit)
 
   def top_media_likers_by_followers(
     self,
@@ -1779,4 +2061,672 @@ class HikerApiClient:
       "raw": {
         "sampled_usernames": [item.get("username") for item in sampled_followers],
       },
+    }
+
+  def media_comments_page(
+    self,
+    media_url: str,
+    *,
+    page_id: str | None = None,
+    page_size: int = 15,
+  ) -> dict[str, Any]:
+    media = self.media_info(media_url)
+    media_pk = _as_str(media.get("media_pk"))
+    if not media_pk:
+      raise HikerApiError("Media has no numeric id for comments lookup.")
+
+    page_token = (page_id or "").strip() or None
+    raw_payload = self._request(
+      "/v1/media/comments/chunk",
+      {
+        "id": media_pk,
+        "min_id": page_token,
+        "can_support_threading": True,
+      },
+    )
+    if not isinstance(raw_payload, list) or len(raw_payload) < 2:
+      raise HikerApiError("Unexpected HikerAPI response format for media comments chunk.")
+
+    raw_comments = raw_payload[0] if isinstance(raw_payload[0], list) else []
+    next_page_id = _as_str(raw_payload[1])
+    comments = [
+      _normalize_media_comment_payload(item)
+      for item in raw_comments[:max(1, min(page_size, 50))]
+      if isinstance(item, dict)
+    ]
+
+    return {
+      "entity_type": "media_comments_page",
+      "media": media,
+      "comments": comments,
+      "count": len(comments),
+      "returned_count": len(comments),
+      "available_comment_count": _as_int(media.get("comment_count")),
+      "page_id": page_token,
+      "next_page_id": next_page_id,
+      "page_size": max(1, min(page_size, 50)),
+      "comments_completeness": "roots_only",
+      "replies_loaded": False,
+      "source_endpoint": "/v1/media/comments/chunk",
+    }
+
+  def comment_replies(
+    self,
+    media_url: str,
+    *,
+    comment_id: str,
+    page_id: str | None = None,
+  ) -> dict[str, Any]:
+    media = self.media_info(media_url)
+    media_pk = _as_str(media.get("media_pk")) or _as_str(media.get("media_id"))
+    if not media_pk:
+      raise HikerApiError("Media has no id for comment replies lookup.")
+
+    comment_text = str(comment_id).strip()
+    if not comment_text:
+      raise HikerApiError("comment_id is required.")
+
+    page_token = (page_id or "").strip() or None
+    raw_payload = self._request(
+      "/v2/media/comments/replies",
+      {
+        "media_id": media_pk,
+        "comment_id": comment_text,
+        "min_id": page_token,
+      },
+    )
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for comment replies.")
+
+    raw_replies = raw_payload.get("child_comments") if isinstance(raw_payload.get("child_comments"), list) else []
+    replies = [
+      _normalize_media_comment_payload(item)
+      for item in raw_replies
+      if isinstance(item, dict)
+    ]
+
+    next_page_id = None
+    for key in ("next_page_id", "next_min_id", "next_max_id", "end_cursor"):
+      candidate = _as_str(raw_payload.get(key))
+      if candidate:
+        next_page_id = candidate
+        break
+
+    parent_comment = raw_payload.get("parent_comment") if isinstance(raw_payload.get("parent_comment"), dict) else None
+    normalized_parent = _normalize_media_comment_payload(parent_comment) if isinstance(parent_comment, dict) else None
+
+    return {
+      "entity_type": "comment_replies",
+      "media": media,
+      "comment_id": comment_text,
+      "parent_comment": normalized_parent,
+      "replies": replies,
+      "returned_count": len(replies),
+      "available_reply_count": _as_int(raw_payload.get("child_comment_count")),
+      "page_id": page_token,
+      "next_page_id": next_page_id,
+      "comments_completeness": "thread_replies",
+      "source_endpoint": "/v2/media/comments/replies",
+    }
+
+  def comment_likers(
+    self,
+    *,
+    comment_id: str,
+    media_id: str | None = None,
+    page_id: str | None = None,
+    limit: int = 20,
+  ) -> dict[str, Any]:
+    comment_text = str(comment_id).strip()
+    if not comment_text:
+      raise HikerApiError("comment_id is required.")
+
+    page_token = (page_id or "").strip() or None
+    params: dict[str, Any] = {"comment_id": comment_text, "end_cursor": page_token}
+    media_id_text = _as_str(media_id)
+    if media_id_text:
+      params["media_id"] = media_id_text
+    try:
+      raw_payload = self._request("/gql/comment/likers/chunk", params)
+    except HikerApiError as exc:
+      if "Entries not found" not in str(exc):
+        raise
+      raw_payload = {"items": [], "more_available": False}
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for comment likers.")
+
+    items = raw_payload.get("items") if isinstance(raw_payload.get("items"), list) else []
+    likers = [
+      _normalize_user_preview(item, source="/gql/comment/likers/chunk", entity_type="comment_liker_preview")
+      for item in items[:max(1, min(limit, 50))]
+      if isinstance(item, dict)
+    ]
+    return {
+      "entity_type": "comment_likers",
+      "comment_id": comment_text,
+      "media_id": media_id_text,
+      "likers": likers,
+      "count": len(likers),
+      "page_id": page_token,
+      "next_page_id": _as_str(raw_payload.get("end_cursor")),
+      "more_available": bool(raw_payload.get("more_available")),
+      "source_endpoint": "/gql/comment/likers/chunk",
+    }
+
+  def media_usertags(self, media_url: str) -> dict[str, Any]:
+    media = self.media_info(media_url)
+    media_pk = _as_str(media.get("media_pk")) or _as_str(media.get("media_id"))
+    if not media_pk:
+      raise HikerApiError("Media has no id for usertags lookup.")
+
+    try:
+      raw_payload = self._request("/gql/media/usertags", {"media_ids": [media_pk]})
+    except HikerApiError:
+      raw_payload = self._request("/gql/media/usertags", {"media_id": media_pk})
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for media usertags.")
+
+    data = raw_payload.get("data") if isinstance(raw_payload.get("data"), dict) else {}
+    nodes: list[dict[str, Any]] = []
+    for value in data.values():
+      if isinstance(value, list):
+        nodes.extend(item for item in value if isinstance(item, dict))
+      elif isinstance(value, dict):
+        nodes.append(value)
+
+    tags: list[dict[str, Any]] = []
+    for node_wrapper in nodes:
+      node = node_wrapper.get("node") if isinstance(node_wrapper.get("node"), dict) else node_wrapper
+      usertags = node.get("usertags") if isinstance(node.get("usertags"), dict) else {}
+      tag_items = usertags.get("in") if isinstance(usertags.get("in"), list) else []
+      for tag in tag_items:
+        if isinstance(tag, dict):
+          tags.append(_normalize_usertag_payload(tag))
+
+    return {
+      "entity_type": "media_usertags",
+      "media": media,
+      "count": len(tags),
+      "tags": tags,
+      "source_endpoint": "/gql/media/usertags",
+    }
+
+  def media_insight(self, media_url: str) -> dict[str, Any]:
+    media = self.media_info(media_url)
+    media_pk = _as_str(media.get("media_pk")) or _as_str(media.get("media_id"))
+    if not media_pk:
+      raise HikerApiError("Media has no id for insight lookup.")
+
+    raw_payload = self._request("/v1/media/insight", {"media_id": media_pk})
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for media insight.")
+    insight = _normalize_media_insight_payload(raw_payload, media=media)
+    return {
+      "entity_type": "media_insight",
+      "media": media,
+      "insight": insight,
+      "source_endpoint": "/v1/media/insight",
+    }
+
+  def following_page(
+    self,
+    target: str,
+    *,
+    page_id: str | None = None,
+    limit: int = 25,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    page_token = (page_id or "").strip()
+    cache_key = (str(user_id), page_token)
+    payload = self._following_page_cache.get(cache_key)
+    if payload is None:
+      raw_payload = self._request(
+        "/g2/user/following",
+        {"user_id": str(user_id), "page_id": page_token or None},
+      )
+      users, next_page_id = self._extract_page_users(raw_payload)
+      payload = {
+        "users": users,
+        "next_page_id": next_page_id,
+        "source_endpoint": "/g2/user/following",
+      }
+      self._following_page_cache[cache_key] = payload
+
+    following = [
+      _normalize_user_preview(item, source=payload["source_endpoint"], entity_type="following_preview")
+      for item in payload["users"][:max(1, min(limit, 50))]
+    ]
+    return {
+      "entity_type": "following_page",
+      "target_username": _as_str(user.get("username")) or username,
+      "user_id": str(user_id),
+      "page_id": page_token or None,
+      "next_page_id": payload.get("next_page_id"),
+      "count": len(following),
+      "source_endpoint": payload["source_endpoint"],
+      "approximate": False,
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "following": following,
+    }
+
+  def search_profile_followers(
+    self,
+    target: str,
+    *,
+    query: str,
+    force: bool | None = None,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    query_text = query.strip()
+    if not query_text:
+      raise HikerApiError("query is required.")
+
+    params: dict[str, Any] = {"user_id": str(user_id), "query": query_text}
+    if force is not None:
+      params["force"] = force
+    raw_payload = self._request("/v1/user/search/followers", params)
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for follower search.")
+
+    followers = [
+      _normalize_user_preview(item, source="/v1/user/search/followers", entity_type="follower_search_result")
+      for item in raw_payload
+      if isinstance(item, dict)
+    ]
+    return {
+      "entity_type": "profile_followers_search",
+      "target_username": _as_str(user.get("username")) or username,
+      "query": query_text,
+      "count": len(followers),
+      "force": force,
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "followers": followers,
+      "source_endpoint": "/v1/user/search/followers",
+    }
+
+  def search_profile_following(
+    self,
+    target: str,
+    *,
+    query: str,
+    force: bool | None = None,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    query_text = query.strip()
+    if not query_text:
+      raise HikerApiError("query is required.")
+
+    params: dict[str, Any] = {"user_id": str(user_id), "query": query_text}
+    if force is not None:
+      params["force"] = force
+    raw_payload = self._request("/v1/user/search/following", params)
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for following search.")
+
+    following = [
+      _normalize_user_preview(item, source="/v1/user/search/following", entity_type="following_search_result")
+      for item in raw_payload
+      if isinstance(item, dict)
+    ]
+    return {
+      "entity_type": "profile_following_search",
+      "target_username": _as_str(user.get("username")) or username,
+      "query": query_text,
+      "count": len(following),
+      "force": force,
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "following": following,
+      "source_endpoint": "/v1/user/search/following",
+    }
+
+  def profile_pinned_publications(self, target: str, *, limit: int = 12) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    requested_limit = max(1, min(limit, 50))
+    raw_payload = self._request(
+      "/v1/user/medias/pinned",
+      {"user_id": str(user_id), "amount": requested_limit},
+    )
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for pinned medias.")
+    publications = [
+      _normalize_publication_payload(item)
+      for item in raw_payload[:requested_limit]
+      if isinstance(item, dict)
+    ]
+    publications.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+    return {
+      "entity_type": "profile_pinned_publications",
+      "username": _as_str(user.get("username")) or username,
+      "user_id": str(user_id),
+      "count": len(publications),
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "publications": publications,
+      "source_endpoint": "/v1/user/medias/pinned",
+    }
+
+  def profile_tagged_publications_page(
+    self,
+    target: str,
+    *,
+    page_id: str | None = None,
+    page_size: int = MAX_PROFILE_COLLECTION_PAGE_SIZE,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    page_token = (page_id or "").strip()
+    cache_key = (str(user_id), page_token)
+    payload = self._tagged_page_cache.get(cache_key)
+    if payload is None:
+      raw_payload = self._request(
+        "/v2/user/tag/medias",
+        {"user_id": str(user_id), "page_id": page_token or None},
+      )
+      if not isinstance(raw_payload, dict):
+        raise HikerApiError("Unexpected HikerAPI response format for tagged medias.")
+      response = raw_payload.get("response") if isinstance(raw_payload.get("response"), dict) else {}
+      items = response.get("items") if isinstance(response.get("items"), list) else []
+      payload = {
+        "items": [item for item in items if isinstance(item, dict)],
+        "next_page_id": _as_str(raw_payload.get("next_page_id")) or _as_str(response.get("next_max_id")),
+        "source_endpoint": "/v2/user/tag/medias",
+      }
+      self._tagged_page_cache[cache_key] = payload
+
+    publications = [
+      _normalize_publication_payload(item)
+      for item in payload["items"][:max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE))]
+    ]
+    publications.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+    return {
+      "entity_type": "profile_tagged_publications_page",
+      "username": _as_str(user.get("username")) or username,
+      "user_id": str(user_id),
+      "count": len(publications),
+      "page_id": page_token or None,
+      "page_size": max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE)),
+      "next_page_id": payload.get("next_page_id"),
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "publications": publications,
+      "source_endpoint": payload["source_endpoint"],
+    }
+
+  def profile_tagged_publications(
+    self,
+    target: str,
+    *,
+    limit: int = 12,
+    max_pages: int = 3,
+    page_size: int = MAX_PROFILE_COLLECTION_PAGE_SIZE,
+  ) -> dict[str, Any]:
+    requested_limit = max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS))
+    requested_pages = max(1, min(max_pages, MAX_PROFILE_COLLECTION_PAGES))
+    requested_page_size = max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE))
+
+    page_id: str | None = None
+    pages_used = 0
+    publications: list[dict[str, Any]] = []
+    seen_shortcodes: set[str] = set()
+    last_page: dict[str, Any] | None = None
+    while pages_used < requested_pages and len(publications) < requested_limit:
+      page = self.profile_tagged_publications_page(target, page_id=page_id, page_size=requested_page_size)
+      last_page = page
+      pages_used += 1
+      page_id = _as_str(page.get("next_page_id"))
+      page_publications = page.get("publications") if isinstance(page.get("publications"), list) else []
+      for item in page_publications:
+        if not isinstance(item, dict):
+          continue
+        shortcode = _as_str(item.get("shortcode"))
+        if shortcode and shortcode in seen_shortcodes:
+          continue
+        if shortcode:
+          seen_shortcodes.add(shortcode)
+        publications.append(item)
+        if len(publications) >= requested_limit:
+          break
+      if not page_id:
+        break
+
+    if not isinstance(last_page, dict):
+      raise HikerApiError("Could not fetch tagged publications.")
+    return {
+      "entity_type": "profile_tagged_publications",
+      "username": last_page.get("username"),
+      "user_id": last_page.get("user_id"),
+      "count": len(publications[:requested_limit]),
+      "pages_used": pages_used,
+      "next_page_id": page_id,
+      "profile": last_page.get("profile"),
+      "publications": publications[:requested_limit],
+      "source_endpoint": last_page.get("source_endpoint"),
+    }
+
+  def system_balance(self) -> dict[str, Any]:
+    raw_payload = self._request("/sys/balance", {})
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for balance.")
+    return {
+      "entity_type": "system_balance",
+      "amount": raw_payload.get("amount"),
+      "currency": _as_str(raw_payload.get("currency")),
+      "rate": raw_payload.get("rate"),
+      "requests": raw_payload.get("requests"),
+      "raw": raw_payload,
+      "source_endpoint": "/sys/balance",
+    }
+
+  def hashtag_info(self, name: str) -> dict[str, Any]:
+    hashtag_name = name.strip().lstrip("#")
+    if not hashtag_name:
+      raise HikerApiError("Hashtag name is required.")
+    raw_payload = self._request("/v1/hashtag/by/name", {"name": hashtag_name})
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for hashtag.")
+    hashtag = _normalize_hashtag_payload(raw_payload)
+    hashtag["source_endpoint"] = "/v1/hashtag/by/name"
+    return hashtag
+
+  def hashtag_reels(self, name: str, *, limit: int = 12) -> dict[str, Any]:
+    hashtag_name = name.strip().lstrip("#")
+    if not hashtag_name:
+      raise HikerApiError("Hashtag name is required.")
+    requested_limit = max(1, min(limit, 50))
+    raw_payload = self._request("/v1/hashtag/medias/clips", {"name": hashtag_name, "amount": requested_limit})
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for hashtag clips.")
+    reels = [
+      _normalize_reel_payload(item)
+      for item in raw_payload[:requested_limit]
+      if isinstance(item, dict)
+    ]
+    for reel in reels:
+      reel["entity_type"] = "reel_preview"
+    reels.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+    return {
+      "entity_type": "hashtag_reels",
+      "hashtag": hashtag_name,
+      "count": len(reels),
+      "reels": reels,
+      "source_endpoint": "/v1/hashtag/medias/clips",
+    }
+
+  def search_places(
+    self,
+    query: str,
+    *,
+    lat: float | None = None,
+    lng: float | None = None,
+    limit: int = 20,
+  ) -> dict[str, Any]:
+    query_text = query.strip()
+    if not query_text:
+      raise HikerApiError("Place query is required.")
+    params: dict[str, Any] = {"query": query_text}
+    if lat is not None:
+      params["lat"] = lat
+    if lng is not None:
+      params["lng"] = lng
+    raw_payload = self._request("/v1/fbsearch/places", params)
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for place search.")
+    requested_limit = max(1, min(limit, 50))
+    items = [
+      _normalize_place_payload(item)
+      for item in raw_payload[:requested_limit]
+      if isinstance(item, dict)
+    ]
+    return {
+      "entity_type": "place_search_results",
+      "query": query_text,
+      "count": len(items),
+      "items": items,
+      "source_endpoint": "/v1/fbsearch/places",
+    }
+
+  def location_recent_media(self, location_pk: int | str, *, limit: int = 12) -> dict[str, Any]:
+    location_value = _as_int(location_pk)
+    if location_value <= 0:
+      raise HikerApiError("location_pk must be a positive integer.")
+    requested_limit = max(1, min(limit, 50))
+    raw_payload = self._request(
+      "/v1/location/medias/recent",
+      {"location_pk": location_value, "amount": requested_limit},
+    )
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for location recent media.")
+    publications = [
+      _normalize_publication_payload(item)
+      for item in raw_payload[:requested_limit]
+      if isinstance(item, dict)
+    ]
+    publications.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+    return {
+      "entity_type": "location_recent_media",
+      "location_pk": location_value,
+      "count": len(publications),
+      "publications": publications,
+      "source_endpoint": "/v1/location/medias/recent",
+    }
+
+  def search_music(self, query: str, *, limit: int = 10) -> dict[str, Any]:
+    query_text = query.strip()
+    if not query_text:
+      raise HikerApiError("Music query is required.")
+    raw_payload = self._request("/v1/search/music", {"query": query_text})
+    if not isinstance(raw_payload, list):
+      raise HikerApiError("Unexpected HikerAPI response format for music search.")
+    requested_limit = max(1, min(limit, 50))
+    tracks = [
+      _normalize_music_track_payload(item)
+      for item in raw_payload[:requested_limit]
+      if isinstance(item, dict)
+    ]
+    return {
+      "entity_type": "music_search_results",
+      "query": query_text,
+      "count": len(tracks),
+      "tracks": tracks,
+      "source_endpoint": "/v1/search/music",
+    }
+
+  def track_media(
+    self,
+    track_id: str,
+    *,
+    page_id: str | None = None,
+    limit: int = 12,
+    stream: bool = False,
+  ) -> dict[str, Any]:
+    track_text = str(track_id).strip()
+    if not track_text:
+      raise HikerApiError("track_id is required.")
+    endpoint = "/v2/track/stream/by/id" if stream else "/v2/track/by/id"
+    raw_payload = self._request(endpoint, {"track_id": track_text, "page_id": (page_id or "").strip() or None})
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for track media.")
+    response = raw_payload.get("response") if isinstance(raw_payload.get("response"), dict) else {}
+    items = response.get("items") if isinstance(response.get("items"), list) else []
+    requested_limit = max(1, min(limit, 50))
+    publications: list[dict[str, Any]] = []
+    for item in items[:requested_limit]:
+      if not isinstance(item, dict):
+        continue
+      media = item.get("media") if isinstance(item.get("media"), dict) else item
+      if not isinstance(media, dict):
+        continue
+      publications.append(_normalize_publication_payload(media))
+    publications.sort(key=lambda item: int(item.get("taken_at_ts") or 0), reverse=True)
+    return {
+      "entity_type": "track_media",
+      "track_id": track_text,
+      "count": len(publications),
+      "page_id": (page_id or "").strip() or None,
+      "next_page_id": _as_str(raw_payload.get("next_page_id")) or _as_str(response.get("next_max_id")),
+      "stream": stream,
+      "publications": publications,
+      "source_endpoint": endpoint,
+    }
+
+  def profile_suggestions(
+    self,
+    target: str,
+    *,
+    expand_suggestion: bool = False,
+    limit: int = 20,
+  ) -> dict[str, Any]:
+    username, user = self._get_user_by_target(target)
+    user_id = user.get("pk") or user.get("id")
+    if user_id is None:
+      raise HikerApiError("Profile has no user_id in HikerAPI response.")
+
+    requested_limit = max(1, min(limit, 50))
+    limitation: str | None = None
+    try:
+      raw_payload = self._request(
+        "/v2/user/suggested/profiles",
+        {"user_id": str(user_id), "expand_suggestion": expand_suggestion},
+      )
+    except HikerApiError as exc:
+      message = str(exc)
+      if "Not eligible for chaining" not in message:
+        raise
+      limitation = message
+      raw_payload = {"users": []}
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for suggested profiles.")
+    raw_users = raw_payload.get("users") if isinstance(raw_payload.get("users"), list) else []
+    profiles = [
+      _normalize_user_preview(item, source="/v2/user/suggested/profiles", entity_type="suggested_profile")
+      for item in raw_users[:requested_limit]
+      if isinstance(item, dict)
+    ]
+    return {
+      "entity_type": "profile_suggestions",
+      "target_username": _as_str(user.get("username")) or username,
+      "count": len(profiles),
+      "expand_suggestion": expand_suggestion,
+      "eligible_for_chaining": limitation is None,
+      "limitation": limitation,
+      "profile": self._normalize_profile_user(user, username_input=username),
+      "profiles": profiles,
+      "source_endpoint": "/v2/user/suggested/profiles",
     }

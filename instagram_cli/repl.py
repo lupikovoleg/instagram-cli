@@ -36,6 +36,12 @@ from instagram_cli.hiker_api import (
   extract_profile_username,
   extract_reel_shortcode,
 )
+from instagram_cli.limits import (
+  MAX_DAYS_BACK,
+  MAX_PROFILE_COLLECTION_ITEMS,
+  MAX_PROFILE_COLLECTION_PAGE_SIZE,
+  MAX_SEARCH_RESULTS,
+)
 from instagram_cli.openrouter_agent import OpenRouterAgent, OpenRouterAgentError
 
 
@@ -77,9 +83,9 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
           },
           "limit": {
             "type": "integer",
-            "description": "How many search results to return (1..20)",
+            "description": f"How many search results to return (1..{MAX_SEARCH_RESULTS})",
             "minimum": 1,
-            "maximum": 20,
+            "maximum": MAX_SEARCH_RESULTS,
           },
           "media_only": {
             "type": "boolean",
@@ -133,9 +139,9 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
           },
           "limit": {
             "type": "integer",
-            "description": "Number of latest reels to fetch (1..20)",
+            "description": f"Number of latest reels to fetch (1..{MAX_PROFILE_COLLECTION_ITEMS})",
             "minimum": 1,
-            "maximum": 20,
+            "maximum": MAX_PROFILE_COLLECTION_ITEMS,
           },
         },
         "required": ["target"],
@@ -160,9 +166,45 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
           },
           "limit": {
             "type": "integer",
-            "description": "How many reels to return (1..20)",
+            "description": f"How many reels to return (1..{MAX_PROFILE_COLLECTION_ITEMS})",
             "minimum": 1,
-            "maximum": 20,
+            "maximum": MAX_PROFILE_COLLECTION_ITEMS,
+          },
+          "days_back": {
+            "type": "integer",
+            "description": "Only include reels published in the last N days (1..30)",
+            "minimum": 1,
+            "maximum": 30,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_reels_page",
+      "description": (
+        "Get one cursor-based page of profile reels. "
+        "Use this to continue beyond the single-call collection limit or to fetch the next page from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL. Omit to use current session profile.",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous reels page. Omit for the first page.",
+          },
+          "page_size": {
+            "type": "integer",
+            "description": f"How many reels to fetch in this page (1..{MAX_PROFILE_COLLECTION_PAGE_SIZE})",
+            "minimum": 1,
+            "maximum": MAX_PROFILE_COLLECTION_PAGE_SIZE,
           },
           "days_back": {
             "type": "integer",
@@ -192,9 +234,50 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
           },
           "limit": {
             "type": "integer",
-            "description": "How many publications to return (1..20)",
+            "description": f"How many publications to return (1..{MAX_PROFILE_COLLECTION_ITEMS})",
             "minimum": 1,
-            "maximum": 20,
+            "maximum": MAX_PROFILE_COLLECTION_ITEMS,
+          },
+          "days_back": {
+            "type": "integer",
+            "description": "Only include publications from the last N days (1..30)",
+            "minimum": 1,
+            "maximum": 30,
+          },
+          "publication_type": {
+            "type": "string",
+            "enum": ["all", "reels", "posts", "carousels"],
+            "description": "Filter main-grid publications by type.",
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_publications_page",
+      "description": (
+        "Get one cursor-based page of profile publications from the main grid. "
+        "Use this to continue beyond the single-call collection limit or to fetch the next page from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Optional Instagram username or profile URL. Omit to use current session profile.",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous publications page. Omit for the first page.",
+          },
+          "page_size": {
+            "type": "integer",
+            "description": f"How many publications to fetch in this page (1..{MAX_PROFILE_COLLECTION_PAGE_SIZE})",
+            "minimum": 1,
+            "maximum": MAX_PROFILE_COLLECTION_PAGE_SIZE,
           },
           "days_back": {
             "type": "integer",
@@ -243,6 +326,34 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
   {
     "type": "function",
     "function": {
+      "name": "get_following_page",
+      "description": "Get one page of following accounts for a profile.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Number of following accounts to return from the page (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous following page",
+          },
+        },
+        "required": ["target"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_top_followers",
       "description": (
         "Get an approximate ranking of the biggest followers by follower count using a limited sampled subset."
@@ -281,6 +392,58 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
   {
     "type": "function",
     "function": {
+      "name": "search_profile_followers",
+      "description": "Search inside a profile's followers list by keyword.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL",
+          },
+          "query": {
+            "type": "string",
+            "description": "Keyword to search inside followers",
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Optional HikerAPI force flag for follower search",
+          },
+        },
+        "required": ["target", "query"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_profile_following",
+      "description": "Search inside a profile's following list by keyword.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL",
+          },
+          "query": {
+            "type": "string",
+            "description": "Keyword to search inside following",
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Optional HikerAPI force flag for following search",
+          },
+        },
+        "required": ["target", "query"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_media_comments",
       "description": (
         "Get comments for an Instagram reel or post URL. "
@@ -298,6 +461,210 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
             "description": "How many comments to return (1..50)",
             "minimum": 1,
             "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_media_comments_page",
+      "description": (
+        "Get one paginated page of root comments for an Instagram reel or post URL. "
+        "If media_url is omitted, use the current reel or post from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "media_url": {
+            "type": "string",
+            "description": "Optional Instagram reel or post URL",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous comments page",
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "How many comments to return from the page (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_comment_replies",
+      "description": (
+        "Get replies for a specific root comment on the current or specified media. "
+        "Use comment_id from an earlier comments result."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "comment_id": {
+            "type": "string",
+            "description": "Instagram comment id from a previous comments result",
+          },
+          "media_url": {
+            "type": "string",
+            "description": "Optional Instagram reel or post URL",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional reply page cursor",
+          },
+        },
+        "required": ["comment_id"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_comment_likers",
+      "description": "Get users who liked a specific comment.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "comment_id": {
+            "type": "string",
+            "description": "Instagram comment id from a previous comments result",
+          },
+          "media_id": {
+            "type": "string",
+            "description": "Optional media id for comment liker lookup",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous comment likers result",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many likers to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "required": ["comment_id"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_pinned_publications",
+      "description": "Get pinned publications for a profile.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL. Omit to use current profile.",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many pinned publications to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_tagged_publications",
+      "description": "Get publications where the profile is tagged.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL. Omit to use current profile.",
+          },
+          "limit": {
+            "type": "integer",
+            "description": f"How many tagged publications to return (1..{MAX_PROFILE_COLLECTION_ITEMS})",
+            "minimum": 1,
+            "maximum": MAX_PROFILE_COLLECTION_ITEMS,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_tagged_publications_page",
+      "description": "Get one cursor-based page of publications where the profile is tagged.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL. Omit to use current profile.",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous tagged publications page.",
+          },
+          "page_size": {
+            "type": "integer",
+            "description": f"How many tagged publications to return (1..{MAX_PROFILE_COLLECTION_PAGE_SIZE})",
+            "minimum": 1,
+            "maximum": MAX_PROFILE_COLLECTION_PAGE_SIZE,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_media_usertags",
+      "description": (
+        "Get users tagged in an Instagram reel or post. "
+        "If media_url is omitted, use the current reel or post from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "media_url": {
+            "type": "string",
+            "description": "Optional Instagram reel or post URL",
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_media_insight",
+      "description": (
+        "Get deeper insight metrics for an Instagram reel or post. "
+        "If media_url is omitted, use the current reel or post from session context."
+      ),
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "media_url": {
+            "type": "string",
+            "description": "Optional Instagram reel or post URL",
           },
         },
         "additionalProperties": False,
@@ -349,6 +716,199 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
             "type": "integer",
             "description": "How many highlight folders to return, 0 means all available",
             "minimum": 0,
+            "maximum": 50,
+          },
+        },
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_system_balance",
+      "description": "Get the current HikerAPI balance and request rate information.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_hashtag_info",
+      "description": "Get metadata for an Instagram hashtag.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Hashtag name with or without #",
+          },
+        },
+        "required": ["name"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_hashtag_reels",
+      "description": "Get recent reels for an Instagram hashtag.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Hashtag name with or without #",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many reels to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "required": ["name"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_places",
+      "description": "Search Instagram places by query, optionally near latitude/longitude.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Place search query",
+          },
+          "lat": {
+            "type": "number",
+            "description": "Optional latitude",
+          },
+          "lng": {
+            "type": "number",
+            "description": "Optional longitude",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many places to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_location_recent_media",
+      "description": "Get recent media for an Instagram location id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location_pk": {
+            "type": "integer",
+            "description": "Instagram location primary key",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many publications to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "required": ["location_pk"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_music",
+      "description": "Search Instagram music/audio tracks by query.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Track or audio search query",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many tracks to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_track_media",
+      "description": "Get media using a specific Instagram audio track id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "track_id": {
+            "type": "string",
+            "description": "Instagram track id from a music search result",
+          },
+          "page_id": {
+            "type": "string",
+            "description": "Optional next_page_id from a previous track media result",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many publications to return (1..50)",
+            "minimum": 1,
+            "maximum": 50,
+          },
+          "stream": {
+            "type": "boolean",
+            "description": "If true, use the track stream endpoint instead of the default track feed endpoint.",
+          },
+        },
+        "required": ["track_id"],
+        "additionalProperties": False,
+      },
+    },
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_profile_suggestions",
+      "description": "Get suggested profiles related to a profile.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Instagram username or profile URL. Omit to use current profile.",
+          },
+          "expand_suggestion": {
+            "type": "boolean",
+            "description": "Optional HikerAPI expand_suggestion flag",
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many suggested profiles to return (1..50)",
+            "minimum": 1,
             "maximum": 50,
           },
         },
@@ -591,11 +1151,29 @@ class SessionState:
   current_profile_reels: dict[str, Any] | None = None
   current_profile_publications: dict[str, Any] | None = None
   current_followers_page: dict[str, Any] | None = None
+  current_following_page: dict[str, Any] | None = None
   current_top_followers: dict[str, Any] | None = None
+  current_follower_search: dict[str, Any] | None = None
+  current_following_search: dict[str, Any] | None = None
   current_stories: dict[str, Any] | None = None
   current_highlights: dict[str, Any] | None = None
   current_media_comments: dict[str, Any] | None = None
+  current_media_comments_page: dict[str, Any] | None = None
+  current_comment_replies: dict[str, Any] | None = None
+  current_comment_likers: dict[str, Any] | None = None
   current_media_likers: dict[str, Any] | None = None
+  current_media_usertags: dict[str, Any] | None = None
+  current_media_insight: dict[str, Any] | None = None
+  current_pinned_publications: dict[str, Any] | None = None
+  current_tagged_publications: dict[str, Any] | None = None
+  current_hashtag: dict[str, Any] | None = None
+  current_hashtag_reels: dict[str, Any] | None = None
+  current_place_search: dict[str, Any] | None = None
+  current_location_media: dict[str, Any] | None = None
+  current_music_search: dict[str, Any] | None = None
+  current_track_media: dict[str, Any] | None = None
+  current_profile_suggestions: dict[str, Any] | None = None
+  current_system_balance: dict[str, Any] | None = None
   last_collection: dict[str, Any] | None = None
   last_export: dict[str, Any] | None = None
   last_download: dict[str, Any] | None = None
@@ -1014,7 +1592,12 @@ def _print_profile_reels(data: dict[str, Any]) -> None:
     f"days_back={filters.get('days_back') or 'any'}, "
     f"limit={filters.get('limit') or 0}"
   )
-  print(f"pages used: {data.get('pages_used', 0)}")
+  if "page_size" in data:
+    print(f"page size: {data.get('page_size', 0)}")
+    print(f"page id: {data.get('page_id') or 'first page'}")
+    print(f"next page id: {data.get('next_page_id') or 'none'}")
+  else:
+    print(f"pages used: {data.get('pages_used', 0)}")
   print(f"scanned reels: {data.get('scanned_reels', 0)}")
   reels = data.get("reels") if isinstance(data.get("reels"), list) else []
   for index, item in enumerate(reels, start=1):
@@ -1039,7 +1622,12 @@ def _print_profile_publications(data: dict[str, Any]) -> None:
     f"days_back={filters.get('days_back') or 'any'}, "
     f"limit={filters.get('limit') or 0}"
   )
-  print(f"pages used: {data.get('pages_used', 0)}")
+  if "page_size" in data:
+    print(f"page size: {data.get('page_size', 0)}")
+    print(f"page id: {data.get('page_id') or 'first page'}")
+    print(f"next page id: {data.get('next_page_id') or 'none'}")
+  else:
+    print(f"pages used: {data.get('pages_used', 0)}")
   print(f"scanned publications: {data.get('scanned_publications', 0)}")
   publications = data.get("publications") if isinstance(data.get("publications"), list) else []
   for index, item in enumerate(publications, start=1):
@@ -1224,6 +1812,16 @@ def _print_help() -> None:
     "- show the last 5 reels from this profile from the last week\n"
     "- show the last 10 publications from this profile\n"
     "- show carousels from this profile\n"
+    "- show pinned posts from this profile\n"
+    "- show tagged posts for this profile\n"
+    "- search within this profile's following for travel\n"
+    "- show replies to the first comment on this post\n"
+    "- who liked that comment?\n"
+    "- show reels for hashtag dubai\n"
+    "- search places in Dubai\n"
+    "- search Instagram music for dubai\n"
+    "- show suggested profiles for this account\n"
+    "- show HikerAPI balance\n"
     "- export that to csv\n"
     "- download this reel\n"
     "- download audio from this reel\n"
@@ -1246,12 +1844,16 @@ def _print_actions() -> None:
     "8. List active stories and highlight folders for a profile.\n"
     "9. Fetch follower pages with low API cost.\n"
     "10. Estimate top followers from a bounded sampled subset to control API spend.\n"
-    "11. Rank likers by follower count when explicitly requested.\n"
-    "12. Export the current collection to CSV or JSON.\n"
-    "13. Download reels, posts, stories, highlights, and media audio to local files.\n"
-    "13. Check for remote git updates at startup and update safely with 'update'.\n"
-    "14. Ask natural language questions; agent decides tool calls automatically.\n"
-    "15. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
+    "11. Search inside followers/following, inspect pinned posts, tagged posts, and related profile suggestions.\n"
+    "12. Inspect comments as roots or replies, plus comment likers and tagged users on a media item.\n"
+    "13. Discover by hashtag, place, and music track, then continue into the matching media.\n"
+    "14. Check deeper media insight metrics and current HikerAPI balance.\n"
+    "15. Rank likers by follower count when explicitly requested.\n"
+    "16. Export the current collection to CSV or JSON.\n"
+    "17. Download reels, posts, stories, highlights, and media audio to local files.\n"
+    "18. Check for remote git updates at startup and update safely with 'update'.\n"
+    "19. Ask natural language questions; agent decides tool calls automatically.\n"
+    "20. Follow-ups use session context (current search/profile/reel/media/collection/download).\n",
   )
 
 
@@ -1355,6 +1957,11 @@ def _resolve_profile_target(target: str | None, state: SessionState) -> str | No
     state.current_reel,
     state.current_profile_reels.get("profile") if isinstance(state.current_profile_reels, dict) else None,
     state.current_profile_publications.get("profile") if isinstance(state.current_profile_publications, dict) else None,
+    state.current_followers_page.get("profile") if isinstance(state.current_followers_page, dict) else None,
+    state.current_following_page.get("profile") if isinstance(state.current_following_page, dict) else None,
+    state.current_pinned_publications.get("profile") if isinstance(state.current_pinned_publications, dict) else None,
+    state.current_tagged_publications.get("profile") if isinstance(state.current_tagged_publications, dict) else None,
+    state.current_profile_suggestions.get("profile") if isinstance(state.current_profile_suggestions, dict) else None,
   ):
     if not isinstance(source, dict):
       continue
@@ -1379,6 +1986,23 @@ def _resolve_media_url(media_url: str | None, state: SessionState) -> str | None
     url = str(source.get("url") or "").strip()
     if url and extract_reel_shortcode(url):
       return url
+  return None
+
+
+def _resolve_collection_page_id(
+  page_id: str | None,
+  *,
+  state_payload: dict[str, Any] | None,
+  allow_session_fallback: bool,
+) -> str | None:
+  candidate = (page_id or "").strip()
+  if candidate:
+    return candidate
+  if not allow_session_fallback or not isinstance(state_payload, dict):
+    return None
+  next_page_id = state_payload.get("next_page_id")
+  if isinstance(next_page_id, str) and next_page_id.strip():
+    return next_page_id.strip()
   return None
 
 
@@ -1421,6 +2045,35 @@ def _openable_items_from_state(state: SessionState) -> list[dict[str, str]]:
       if not url:
         continue
       label = str(item.get("shortcode") or item.get("publication_kind") or url)
+      items.append({"label": label, "url": url})
+
+  for payload in (
+    state.current_pinned_publications,
+    state.current_tagged_publications,
+    state.current_location_media,
+    state.current_track_media,
+  ):
+    publications = payload.get("publications") if isinstance(payload, dict) else None
+    if not isinstance(publications, list):
+      continue
+    for item in publications:
+      if not isinstance(item, dict):
+        continue
+      url = str(item.get("url") or "").strip()
+      if not url:
+        continue
+      label = str(item.get("shortcode") or item.get("publication_kind") or url)
+      items.append({"label": label, "url": url})
+
+  hashtag_reels = state.current_hashtag_reels.get("reels") if isinstance(state.current_hashtag_reels, dict) else None
+  if isinstance(hashtag_reels, list):
+    for item in hashtag_reels:
+      if not isinstance(item, dict):
+        continue
+      url = str(item.get("url") or "").strip()
+      if not url:
+        continue
+      label = str(item.get("shortcode") or item.get("username") or url)
       items.append({"label": label, "url": url})
 
   if state.current_reel and isinstance(state.current_reel, dict):
@@ -1689,7 +2342,7 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
     state.current_reel = stats
     return
 
-  if entity_type == "profile_reels":
+  if entity_type in {"profile_reels", "profile_reels_page"}:
     profile = stats.get("profile")
     reels = stats.get("reels") if isinstance(stats.get("reels"), list) else []
     if isinstance(profile, dict):
@@ -1704,7 +2357,7 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
       state.current_reel = state.recent_reels[0]
     return
 
-  if entity_type == "profile_publications":
+  if entity_type in {"profile_publications", "profile_publications_page"}:
     profile = stats.get("profile")
     publications = stats.get("publications") if isinstance(stats.get("publications"), list) else []
     if isinstance(profile, dict):
@@ -1750,6 +2403,19 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
     state.current_followers_page = stats
     return
 
+  if entity_type == "following_page":
+    profile = stats.get("profile")
+    if isinstance(profile, dict):
+      previous_username = (state.current_profile or {}).get("username")
+      next_username = profile.get("username")
+      state.current_profile = profile
+      if previous_username != next_username:
+        state.recent_reels = None
+        state.current_profile_publications = None
+        state.current_top_followers = None
+    state.current_following_page = stats
+    return
+
   if entity_type == "top_followers_sample":
     profile = stats.get("profile")
     if isinstance(profile, dict):
@@ -1763,11 +2429,43 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
     state.current_top_followers = stats
     return
 
+  if entity_type == "profile_followers_search":
+    profile = stats.get("profile")
+    if isinstance(profile, dict):
+      state.current_profile = profile
+    state.current_follower_search = stats
+    return
+
+  if entity_type == "profile_following_search":
+    profile = stats.get("profile")
+    if isinstance(profile, dict):
+      state.current_profile = profile
+    state.current_following_search = stats
+    return
+
   if entity_type == "media_comments":
     media = stats.get("media")
     if isinstance(media, dict):
       state.current_media = media
     state.current_media_comments = stats
+    return
+
+  if entity_type == "media_comments_page":
+    media = stats.get("media")
+    if isinstance(media, dict):
+      state.current_media = media
+    state.current_media_comments_page = stats
+    return
+
+  if entity_type == "comment_replies":
+    media = stats.get("media")
+    if isinstance(media, dict):
+      state.current_media = media
+    state.current_comment_replies = stats
+    return
+
+  if entity_type == "comment_likers":
+    state.current_comment_likers = stats
     return
 
   if entity_type == "media_likers":
@@ -1779,6 +2477,126 @@ def _update_context_with_stats(state: SessionState, stats: dict[str, Any]) -> No
 
   if entity_type == "media_likers_ranked":
     state.current_media_likers = stats
+    return
+
+  if entity_type == "media_usertags":
+    media = stats.get("media")
+    if isinstance(media, dict):
+      state.current_media = media
+    state.current_media_usertags = stats
+    return
+
+  if entity_type == "media_insight":
+    media = stats.get("media")
+    if isinstance(media, dict):
+      state.current_media = media
+    state.current_media_insight = stats
+    return
+
+  if entity_type == "profile_pinned_publications":
+    profile = stats.get("profile")
+    publications = stats.get("publications") if isinstance(stats.get("publications"), list) else []
+    if isinstance(profile, dict):
+      state.current_profile = profile
+    state.current_pinned_publications = stats
+    if publications and isinstance(publications[0], dict):
+      state.current_media = {
+        "entity_type": "media",
+        "url": publications[0].get("url"),
+        "shortcode": publications[0].get("shortcode"),
+        "username": publications[0].get("username"),
+        "product_type": publications[0].get("product_type"),
+        "published_at_utc": publications[0].get("published_at_utc"),
+        "published_at_local": publications[0].get("published_at_local"),
+      }
+    return
+
+  if entity_type in {"profile_tagged_publications", "profile_tagged_publications_page"}:
+    profile = stats.get("profile")
+    publications = stats.get("publications") if isinstance(stats.get("publications"), list) else []
+    if isinstance(profile, dict):
+      state.current_profile = profile
+    state.current_tagged_publications = stats
+    if publications and isinstance(publications[0], dict):
+      state.current_media = {
+        "entity_type": "media",
+        "url": publications[0].get("url"),
+        "shortcode": publications[0].get("shortcode"),
+        "username": publications[0].get("username"),
+        "product_type": publications[0].get("product_type"),
+        "published_at_utc": publications[0].get("published_at_utc"),
+        "published_at_local": publications[0].get("published_at_local"),
+      }
+    return
+
+  if entity_type == "system_balance":
+    state.current_system_balance = stats
+    return
+
+  if entity_type == "hashtag":
+    state.current_hashtag = stats
+    return
+
+  if entity_type == "hashtag_reels":
+    state.current_hashtag_reels = stats
+    reels = stats.get("reels") if isinstance(stats.get("reels"), list) else []
+    if reels and isinstance(reels[0], dict):
+      state.current_reel = reels[0]
+      state.current_media = {
+        "entity_type": "media",
+        "url": reels[0].get("url"),
+        "shortcode": reels[0].get("shortcode"),
+        "username": reels[0].get("username"),
+        "product_type": reels[0].get("product_type"),
+        "published_at_utc": reels[0].get("published_at_utc"),
+        "published_at_local": reels[0].get("published_at_local"),
+      }
+    return
+
+  if entity_type == "place_search_results":
+    state.current_place_search = stats
+    return
+
+  if entity_type == "location_recent_media":
+    state.current_location_media = stats
+    publications = stats.get("publications") if isinstance(stats.get("publications"), list) else []
+    if publications and isinstance(publications[0], dict):
+      state.current_media = {
+        "entity_type": "media",
+        "url": publications[0].get("url"),
+        "shortcode": publications[0].get("shortcode"),
+        "username": publications[0].get("username"),
+        "product_type": publications[0].get("product_type"),
+        "published_at_utc": publications[0].get("published_at_utc"),
+        "published_at_local": publications[0].get("published_at_local"),
+      }
+    return
+
+  if entity_type == "music_search_results":
+    state.current_music_search = stats
+    return
+
+  if entity_type == "track_media":
+    state.current_track_media = stats
+    publications = stats.get("publications") if isinstance(stats.get("publications"), list) else []
+    if publications and isinstance(publications[0], dict):
+      state.current_media = {
+        "entity_type": "media",
+        "url": publications[0].get("url"),
+        "shortcode": publications[0].get("shortcode"),
+        "username": publications[0].get("username"),
+        "product_type": publications[0].get("product_type"),
+        "published_at_utc": publications[0].get("published_at_utc"),
+        "published_at_local": publications[0].get("published_at_local"),
+      }
+    return
+
+  if entity_type == "profile_suggestions":
+    profile = stats.get("profile")
+    if isinstance(profile, dict):
+      state.current_profile = profile
+    state.current_profile_suggestions = stats
+    return
 
 
 def _build_agent_context(state: SessionState) -> dict[str, Any]:
@@ -1824,12 +2642,48 @@ def _build_agent_context(state: SessionState) -> dict[str, Any]:
     if isinstance(followers, list):
       top_followers["followers"] = [_without_raw(item) for item in followers[:10] if isinstance(item, dict)]
     context["current_top_followers"] = top_followers
+  if state.current_following_page is not None:
+    following_page = _without_raw(state.current_following_page) or {}
+    following = following_page.get("following")
+    if isinstance(following, list):
+      following_page["following"] = [_without_raw(item) for item in following[:10] if isinstance(item, dict)]
+    context["current_following_page"] = following_page
+  if state.current_follower_search is not None:
+    follower_search = _without_raw(state.current_follower_search) or {}
+    followers = follower_search.get("followers")
+    if isinstance(followers, list):
+      follower_search["followers"] = [_without_raw(item) for item in followers[:10] if isinstance(item, dict)]
+    context["current_follower_search"] = follower_search
+  if state.current_following_search is not None:
+    following_search = _without_raw(state.current_following_search) or {}
+    following = following_search.get("following")
+    if isinstance(following, list):
+      following_search["following"] = [_without_raw(item) for item in following[:10] if isinstance(item, dict)]
+    context["current_following_search"] = following_search
   if state.current_media_comments is not None:
     media_comments = _without_raw(state.current_media_comments) or {}
     comments = media_comments.get("comments")
     if isinstance(comments, list):
       media_comments["comments"] = [_without_raw(item) for item in comments[:10] if isinstance(item, dict)]
     context["current_media_comments"] = media_comments
+  if state.current_media_comments_page is not None:
+    media_comments_page = _without_raw(state.current_media_comments_page) or {}
+    comments = media_comments_page.get("comments")
+    if isinstance(comments, list):
+      media_comments_page["comments"] = [_without_raw(item) for item in comments[:10] if isinstance(item, dict)]
+    context["current_media_comments_page"] = media_comments_page
+  if state.current_comment_replies is not None:
+    comment_replies = _without_raw(state.current_comment_replies) or {}
+    replies = comment_replies.get("replies")
+    if isinstance(replies, list):
+      comment_replies["replies"] = [_without_raw(item) for item in replies[:10] if isinstance(item, dict)]
+    context["current_comment_replies"] = comment_replies
+  if state.current_comment_likers is not None:
+    comment_likers = _without_raw(state.current_comment_likers) or {}
+    likers = comment_likers.get("likers")
+    if isinstance(likers, list):
+      comment_likers["likers"] = [_without_raw(item) for item in likers[:10] if isinstance(item, dict)]
+    context["current_comment_likers"] = comment_likers
   if state.current_media_likers is not None:
     media_likers = _without_raw(state.current_media_likers) or {}
     likers = media_likers.get("likers")
@@ -1839,6 +2693,14 @@ def _build_agent_context(state: SessionState) -> dict[str, Any]:
     if isinstance(rows, list):
       media_likers["rows"] = [_without_raw(item) for item in rows[:10] if isinstance(item, dict)]
     context["current_media_likers"] = media_likers
+  if state.current_media_usertags is not None:
+    media_usertags = _without_raw(state.current_media_usertags) or {}
+    tags = media_usertags.get("tags")
+    if isinstance(tags, list):
+      media_usertags["tags"] = [_without_raw(item) for item in tags[:10] if isinstance(item, dict)]
+    context["current_media_usertags"] = media_usertags
+  if state.current_media_insight is not None:
+    context["current_media_insight"] = _without_raw(state.current_media_insight)
   if state.current_stories is not None:
     stories_payload = _without_raw(state.current_stories) or {}
     stories = stories_payload.get("stories")
@@ -1851,6 +2713,58 @@ def _build_agent_context(state: SessionState) -> dict[str, Any]:
     if isinstance(highlights, list):
       highlights_payload["highlights"] = [_without_raw(item) for item in highlights[:10] if isinstance(item, dict)]
     context["current_highlights"] = highlights_payload
+  if state.current_pinned_publications is not None:
+    pinned_publications = _without_raw(state.current_pinned_publications) or {}
+    publications = pinned_publications.get("publications")
+    if isinstance(publications, list):
+      pinned_publications["publications"] = [_without_raw(item) for item in publications[:10] if isinstance(item, dict)]
+    context["current_pinned_publications"] = pinned_publications
+  if state.current_tagged_publications is not None:
+    tagged_publications = _without_raw(state.current_tagged_publications) or {}
+    publications = tagged_publications.get("publications")
+    if isinstance(publications, list):
+      tagged_publications["publications"] = [_without_raw(item) for item in publications[:10] if isinstance(item, dict)]
+    context["current_tagged_publications"] = tagged_publications
+  if state.current_hashtag is not None:
+    context["current_hashtag"] = _without_raw(state.current_hashtag)
+  if state.current_hashtag_reels is not None:
+    hashtag_reels = _without_raw(state.current_hashtag_reels) or {}
+    reels = hashtag_reels.get("reels")
+    if isinstance(reels, list):
+      hashtag_reels["reels"] = [_without_raw(item) for item in reels[:10] if isinstance(item, dict)]
+    context["current_hashtag_reels"] = hashtag_reels
+  if state.current_place_search is not None:
+    place_search = _without_raw(state.current_place_search) or {}
+    items = place_search.get("items")
+    if isinstance(items, list):
+      place_search["items"] = [_without_raw(item) for item in items[:10] if isinstance(item, dict)]
+    context["current_place_search"] = place_search
+  if state.current_location_media is not None:
+    location_media = _without_raw(state.current_location_media) or {}
+    publications = location_media.get("publications")
+    if isinstance(publications, list):
+      location_media["publications"] = [_without_raw(item) for item in publications[:10] if isinstance(item, dict)]
+    context["current_location_media"] = location_media
+  if state.current_music_search is not None:
+    music_search = _without_raw(state.current_music_search) or {}
+    tracks = music_search.get("tracks")
+    if isinstance(tracks, list):
+      music_search["tracks"] = [_without_raw(item) for item in tracks[:10] if isinstance(item, dict)]
+    context["current_music_search"] = music_search
+  if state.current_track_media is not None:
+    track_media = _without_raw(state.current_track_media) or {}
+    publications = track_media.get("publications")
+    if isinstance(publications, list):
+      track_media["publications"] = [_without_raw(item) for item in publications[:10] if isinstance(item, dict)]
+    context["current_track_media"] = track_media
+  if state.current_profile_suggestions is not None:
+    profile_suggestions = _without_raw(state.current_profile_suggestions) or {}
+    profiles = profile_suggestions.get("profiles")
+    if isinstance(profiles, list):
+      profile_suggestions["profiles"] = [_without_raw(item) for item in profiles[:10] if isinstance(item, dict)]
+    context["current_profile_suggestions"] = profile_suggestions
+  if state.current_system_balance is not None:
+    context["current_system_balance"] = _without_raw(state.current_system_balance)
   collection_context = _collection_context(state.last_collection)
   if collection_context is not None:
     context["last_collection"] = collection_context
@@ -1927,7 +2841,7 @@ def _tool_search_instagram(
   hiker: HikerApiClient,
   agent: OpenRouterAgent | None = None,
 ) -> dict[str, Any]:
-  requested_limit = max(1, min(limit, 20))
+  requested_limit = max(1, min(limit, MAX_SEARCH_RESULTS))
   inferred = _infer_search_preferences(query)
   effective_today_only = today_only or bool(inferred.get("today_only"))
   effective_days_back = days_back if isinstance(days_back, int) else inferred.get("days_back")
@@ -2191,6 +3105,67 @@ def _tool_get_profile_reels(
   }
 
 
+def _tool_get_profile_reels_page(
+  *,
+  target: str | None,
+  page_id: str | None,
+  page_size: int,
+  days_back: int | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_profile_reels,
+    allow_session_fallback=not bool((target or "").strip()),
+  )
+  payload = hiker.profile_reels_page(
+    chosen_target,
+    page_id=chosen_page_id,
+    page_size=page_size,
+    days_back=days_back,
+  )
+  _update_context_with_stats(state, payload)
+  reels = payload.get("reels") if isinstance(payload.get("reels"), list) else []
+  safe_reels = [_without_raw(item) for item in reels if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_reels_page",
+    rows=[item for item in safe_reels if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "filters": payload.get("filters"),
+      "page_id": payload.get("page_id"),
+      "next_page_id": payload.get("next_page_id"),
+      "page_size": payload.get("page_size"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-reels-page",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": len(safe_reels),
+    "filters": payload.get("filters"),
+    "page_id": payload.get("page_id"),
+    "next_page_id": payload.get("next_page_id"),
+    "page_size": payload.get("page_size"),
+    "scanned_reels": payload.get("scanned_reels"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "stop_reason": payload.get("stop_reason"),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "reels": safe_reels,
+  }
+
+
 def _tool_get_profile_publications(
   *,
   target: str | None,
@@ -2237,6 +3212,69 @@ def _tool_get_profile_publications(
     "pages_used": payload.get("pages_used"),
     "scanned_publications": payload.get("scanned_publications"),
     "source_endpoint": payload.get("source_endpoint"),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "publications": safe_publications,
+  }
+
+
+def _tool_get_profile_publications_page(
+  *,
+  target: str | None,
+  page_id: str | None,
+  page_size: int,
+  days_back: int | None,
+  publication_type: str,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_profile_publications,
+    allow_session_fallback=not bool((target or "").strip()),
+  )
+  payload = hiker.profile_publications_page(
+    chosen_target,
+    page_id=chosen_page_id,
+    page_size=page_size,
+    days_back=days_back,
+    publication_type=publication_type,
+  )
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_publications_page",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "filters": payload.get("filters"),
+      "page_id": payload.get("page_id"),
+      "next_page_id": payload.get("next_page_id"),
+      "page_size": payload.get("page_size"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-publications-page",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": len(safe_publications),
+    "filters": payload.get("filters"),
+    "page_id": payload.get("page_id"),
+    "next_page_id": payload.get("next_page_id"),
+    "page_size": payload.get("page_size"),
+    "scanned_publications": payload.get("scanned_publications"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "stop_reason": payload.get("stop_reason"),
     "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
     "publications": safe_publications,
   }
@@ -2651,6 +3689,715 @@ def _tool_rank_media_likers_by_followers(
   }
 
 
+def _tool_get_following_page(
+  *,
+  target: str | None,
+  limit: int,
+  page_id: str | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_following_page,
+    allow_session_fallback=not bool((target or "").strip()),
+  )
+  payload = hiker.following_page(chosen_target, limit=limit, page_id=chosen_page_id)
+  _update_context_with_stats(state, payload)
+  following = payload.get("following") if isinstance(payload.get("following"), list) else []
+  safe_following = [_without_raw(item) for item in following if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="following_page",
+    rows=[item for item in safe_following if isinstance(item, dict)],
+    metadata={
+      "target_username": payload.get("target_username"),
+      "next_page_id": payload.get("next_page_id"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('target_username') or 'profile'}-following-page",
+  )
+  return {
+    "ok": True,
+    "target_username": payload.get("target_username"),
+    "count": len(safe_following),
+    "next_page_id": payload.get("next_page_id"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "following": safe_following,
+  }
+
+
+def _tool_search_profile_followers(
+  *,
+  target: str | None,
+  query: str,
+  force: bool | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  payload = hiker.search_profile_followers(chosen_target, query=query, force=force)
+  _update_context_with_stats(state, payload)
+  followers = payload.get("followers") if isinstance(payload.get("followers"), list) else []
+  safe_followers = [_without_raw(item) for item in followers if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_followers_search",
+    rows=[item for item in safe_followers if isinstance(item, dict)],
+    metadata={
+      "target_username": payload.get("target_username"),
+      "query": payload.get("query"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('target_username') or 'profile'}-followers-search",
+  )
+  return {
+    "ok": True,
+    "target_username": payload.get("target_username"),
+    "query": payload.get("query"),
+    "count": len(safe_followers),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "followers": safe_followers,
+  }
+
+
+def _tool_search_profile_following(
+  *,
+  target: str | None,
+  query: str,
+  force: bool | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  payload = hiker.search_profile_following(chosen_target, query=query, force=force)
+  _update_context_with_stats(state, payload)
+  following = payload.get("following") if isinstance(payload.get("following"), list) else []
+  safe_following = [_without_raw(item) for item in following if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_following_search",
+    rows=[item for item in safe_following if isinstance(item, dict)],
+    metadata={
+      "target_username": payload.get("target_username"),
+      "query": payload.get("query"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('target_username') or 'profile'}-following-search",
+  )
+  return {
+    "ok": True,
+    "target_username": payload.get("target_username"),
+    "query": payload.get("query"),
+    "count": len(safe_following),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "following": safe_following,
+  }
+
+
+def _tool_get_media_comments_page(
+  *,
+  media_url: str | None,
+  page_id: str | None,
+  page_size: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_media_url = _resolve_media_url(media_url, state)
+  if not chosen_media_url:
+    return {
+      "ok": False,
+      "error": "media_not_found_in_session",
+      "message": "Provide a reel/post URL or load a reel/post first.",
+    }
+
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_media_comments_page,
+    allow_session_fallback=not bool((media_url or "").strip()),
+  )
+  payload = hiker.media_comments_page(chosen_media_url, page_id=chosen_page_id, page_size=page_size)
+  _update_context_with_stats(state, payload)
+  comments = payload.get("comments") if isinstance(payload.get("comments"), list) else []
+  safe_comments = [_without_raw(item) for item in comments if isinstance(item, dict)]
+  media = payload.get("media") if isinstance(payload.get("media"), dict) else None
+  _set_last_collection(
+    state,
+    name="media_comments_page",
+    rows=[item for item in safe_comments if isinstance(item, dict)],
+    metadata={
+      "media_url": (media or {}).get("url"),
+      "shortcode": (media or {}).get("shortcode"),
+      "available_comment_count": payload.get("available_comment_count"),
+      "comments_completeness": payload.get("comments_completeness"),
+      "next_page_id": payload.get("next_page_id"),
+    },
+    filename_hint=f"{(media or {}).get('shortcode') or 'media'}-comments-page",
+  )
+  return {
+    "ok": True,
+    "media": _without_raw(media) if media else None,
+    "returned_count": payload.get("returned_count"),
+    "available_comment_count": payload.get("available_comment_count"),
+    "page_id": payload.get("page_id"),
+    "next_page_id": payload.get("next_page_id"),
+    "comments_completeness": payload.get("comments_completeness"),
+    "comments": safe_comments,
+  }
+
+
+def _tool_get_comment_replies(
+  *,
+  comment_id: str,
+  media_url: str | None,
+  page_id: str | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_media_url = _resolve_media_url(media_url, state)
+  if not chosen_media_url:
+    return {
+      "ok": False,
+      "error": "media_not_found_in_session",
+      "message": "Provide a reel/post URL or load a reel/post first.",
+    }
+
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_comment_replies,
+    allow_session_fallback=not bool((media_url or "").strip()),
+  )
+  payload = hiker.comment_replies(chosen_media_url, comment_id=comment_id, page_id=chosen_page_id)
+  _update_context_with_stats(state, payload)
+  replies = payload.get("replies") if isinstance(payload.get("replies"), list) else []
+  safe_replies = [_without_raw(item) for item in replies if isinstance(item, dict)]
+  media = payload.get("media") if isinstance(payload.get("media"), dict) else None
+  parent_comment = payload.get("parent_comment") if isinstance(payload.get("parent_comment"), dict) else None
+  _set_last_collection(
+    state,
+    name="comment_replies",
+    rows=[item for item in safe_replies if isinstance(item, dict)],
+    metadata={
+      "media_url": (media or {}).get("url"),
+      "comment_id": payload.get("comment_id"),
+      "available_reply_count": payload.get("available_reply_count"),
+      "next_page_id": payload.get("next_page_id"),
+    },
+    filename_hint=f"{(media or {}).get('shortcode') or 'media'}-comment-replies",
+  )
+  return {
+    "ok": True,
+    "media": _without_raw(media) if media else None,
+    "comment_id": payload.get("comment_id"),
+    "parent_comment": _without_raw(parent_comment) if parent_comment else None,
+    "available_reply_count": payload.get("available_reply_count"),
+    "next_page_id": payload.get("next_page_id"),
+    "comments_completeness": payload.get("comments_completeness"),
+    "replies": safe_replies,
+  }
+
+
+def _tool_get_comment_likers(
+  *,
+  comment_id: str,
+  media_id: str | None,
+  page_id: str | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.comment_likers(comment_id=comment_id, media_id=media_id, page_id=page_id, limit=limit)
+  _update_context_with_stats(state, payload)
+  likers = payload.get("likers") if isinstance(payload.get("likers"), list) else []
+  safe_likers = [_without_raw(item) for item in likers if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="comment_likers",
+    rows=[item for item in safe_likers if isinstance(item, dict)],
+    metadata={
+      "comment_id": payload.get("comment_id"),
+      "media_id": payload.get("media_id"),
+      "next_page_id": payload.get("next_page_id"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint="comment-likers",
+  )
+  return {
+    "ok": True,
+    "comment_id": payload.get("comment_id"),
+    "media_id": payload.get("media_id"),
+    "count": len(safe_likers),
+    "next_page_id": payload.get("next_page_id"),
+    "likers": safe_likers,
+  }
+
+
+def _tool_get_profile_pinned_publications(
+  *,
+  target: str | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  payload = hiker.profile_pinned_publications(chosen_target, limit=limit)
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_pinned_publications",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "count": payload.get("count"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-pinned-publications",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": len(safe_publications),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "publications": safe_publications,
+  }
+
+
+def _tool_get_profile_tagged_publications(
+  *,
+  target: str | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  payload = hiker.profile_tagged_publications(chosen_target, limit=limit)
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_tagged_publications",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "pages_used": payload.get("pages_used"),
+      "next_page_id": payload.get("next_page_id"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-tagged-publications",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": len(safe_publications),
+    "pages_used": payload.get("pages_used"),
+    "next_page_id": payload.get("next_page_id"),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "publications": safe_publications,
+  }
+
+
+def _tool_get_profile_tagged_publications_page(
+  *,
+  target: str | None,
+  page_id: str | None,
+  page_size: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_tagged_publications,
+    allow_session_fallback=not bool((target or "").strip()),
+  )
+  payload = hiker.profile_tagged_publications_page(chosen_target, page_id=chosen_page_id, page_size=page_size)
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_tagged_publications_page",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "username": payload.get("username"),
+      "page_id": payload.get("page_id"),
+      "next_page_id": payload.get("next_page_id"),
+      "page_size": payload.get("page_size"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('username') or 'profile'}-tagged-publications-page",
+  )
+  return {
+    "ok": True,
+    "username": payload.get("username"),
+    "count": len(safe_publications),
+    "page_id": payload.get("page_id"),
+    "next_page_id": payload.get("next_page_id"),
+    "page_size": payload.get("page_size"),
+    "profile": _without_raw(payload.get("profile")) if isinstance(payload.get("profile"), dict) else None,
+    "publications": safe_publications,
+  }
+
+
+def _tool_get_media_usertags(
+  *,
+  media_url: str | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_media_url = _resolve_media_url(media_url, state)
+  if not chosen_media_url:
+    return {
+      "ok": False,
+      "error": "media_not_found_in_session",
+      "message": "Provide a reel/post URL or load a reel/post first.",
+    }
+
+  payload = hiker.media_usertags(chosen_media_url)
+  _update_context_with_stats(state, payload)
+  tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+  safe_tags = [_without_raw(item) for item in tags if isinstance(item, dict)]
+  media = payload.get("media") if isinstance(payload.get("media"), dict) else None
+  _set_last_collection(
+    state,
+    name="media_usertags",
+    rows=[item for item in safe_tags if isinstance(item, dict)],
+    metadata={
+      "media_url": (media or {}).get("url"),
+      "shortcode": (media or {}).get("shortcode"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{(media or {}).get('shortcode') or 'media'}-usertags",
+  )
+  return {
+    "ok": True,
+    "media": _without_raw(media) if media else None,
+    "count": len(safe_tags),
+    "tags": safe_tags,
+  }
+
+
+def _tool_get_media_insight(
+  *,
+  media_url: str | None,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_media_url = _resolve_media_url(media_url, state)
+  if not chosen_media_url:
+    return {
+      "ok": False,
+      "error": "media_not_found_in_session",
+      "message": "Provide a reel/post URL or load a reel/post first.",
+    }
+
+  payload = hiker.media_insight(chosen_media_url)
+  _update_context_with_stats(state, payload)
+  insight = payload.get("insight") if isinstance(payload.get("insight"), dict) else None
+  media = payload.get("media") if isinstance(payload.get("media"), dict) else None
+  _set_last_collection(
+    state,
+    name="media_insight",
+    rows=[_without_raw(insight)] if insight else [],
+    metadata={
+      "media_url": (media or {}).get("url"),
+      "shortcode": (media or {}).get("shortcode"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{(media or {}).get('shortcode') or 'media'}-insight",
+  )
+  return {
+    "ok": True,
+    "media": _without_raw(media) if media else None,
+    "insight": _without_raw(insight) if insight else None,
+  }
+
+
+def _tool_get_system_balance(
+  *,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.system_balance()
+  _update_context_with_stats(state, payload)
+  safe_payload = _without_raw(payload) or {}
+  _set_last_collection(
+    state,
+    name="system_balance",
+    rows=[safe_payload],
+    metadata={"source_endpoint": payload.get("source_endpoint")},
+    filename_hint="hikerapi-balance",
+  )
+  return {"ok": True, **safe_payload}
+
+
+def _tool_get_hashtag_info(
+  *,
+  name: str,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.hashtag_info(name)
+  _update_context_with_stats(state, payload)
+  safe_payload = _without_raw(payload) or {}
+  _set_last_collection(
+    state,
+    name="hashtag_info",
+    rows=[safe_payload],
+    metadata={"source_endpoint": payload.get("source_endpoint")},
+    filename_hint=f"hashtag-{name}",
+  )
+  return {"ok": True, **safe_payload}
+
+
+def _tool_get_hashtag_reels(
+  *,
+  name: str,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.hashtag_reels(name, limit=limit)
+  _update_context_with_stats(state, payload)
+  reels = payload.get("reels") if isinstance(payload.get("reels"), list) else []
+  safe_reels = [_without_raw(item) for item in reels if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="hashtag_reels",
+    rows=[item for item in safe_reels if isinstance(item, dict)],
+    metadata={
+      "hashtag": payload.get("hashtag"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"hashtag-{payload.get('hashtag') or name}-reels",
+  )
+  return {
+    "ok": True,
+    "hashtag": payload.get("hashtag"),
+    "count": len(safe_reels),
+    "reels": safe_reels,
+  }
+
+
+def _tool_search_places(
+  *,
+  query: str,
+  lat: float | None,
+  lng: float | None,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.search_places(query, lat=lat, lng=lng, limit=limit)
+  _update_context_with_stats(state, payload)
+  items = payload.get("items") if isinstance(payload.get("items"), list) else []
+  safe_items = [_without_raw(item) for item in items if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="place_search_results",
+    rows=[item for item in safe_items if isinstance(item, dict)],
+    metadata={
+      "query": payload.get("query"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"places-{query}",
+  )
+  return {
+    "ok": True,
+    "query": payload.get("query"),
+    "count": len(safe_items),
+    "items": safe_items,
+  }
+
+
+def _tool_get_location_recent_media(
+  *,
+  location_pk: int,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.location_recent_media(location_pk, limit=limit)
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="location_recent_media",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "location_pk": payload.get("location_pk"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"location-{location_pk}-recent-media",
+  )
+  return {
+    "ok": True,
+    "location_pk": payload.get("location_pk"),
+    "count": len(safe_publications),
+    "publications": safe_publications,
+  }
+
+
+def _tool_search_music(
+  *,
+  query: str,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  payload = hiker.search_music(query, limit=limit)
+  _update_context_with_stats(state, payload)
+  tracks = payload.get("tracks") if isinstance(payload.get("tracks"), list) else []
+  safe_tracks = [_without_raw(item) for item in tracks if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="music_search_results",
+    rows=[item for item in safe_tracks if isinstance(item, dict)],
+    metadata={
+      "query": payload.get("query"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"music-{query}",
+  )
+  return {
+    "ok": True,
+    "query": payload.get("query"),
+    "count": len(safe_tracks),
+    "tracks": safe_tracks,
+  }
+
+
+def _tool_get_track_media(
+  *,
+  track_id: str,
+  page_id: str | None,
+  limit: int,
+  stream: bool,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_page_id = _resolve_collection_page_id(
+    page_id,
+    state_payload=state.current_track_media,
+    allow_session_fallback=False,
+  )
+  payload = hiker.track_media(track_id, page_id=chosen_page_id, limit=limit, stream=stream)
+  _update_context_with_stats(state, payload)
+  publications = payload.get("publications") if isinstance(payload.get("publications"), list) else []
+  safe_publications = [_without_raw(item) for item in publications if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="track_media",
+    rows=[item for item in safe_publications if isinstance(item, dict)],
+    metadata={
+      "track_id": payload.get("track_id"),
+      "stream": payload.get("stream"),
+      "next_page_id": payload.get("next_page_id"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"track-{track_id}-media",
+  )
+  return {
+    "ok": True,
+    "track_id": payload.get("track_id"),
+    "count": len(safe_publications),
+    "page_id": payload.get("page_id"),
+    "next_page_id": payload.get("next_page_id"),
+    "stream": payload.get("stream"),
+    "publications": safe_publications,
+  }
+
+
+def _tool_get_profile_suggestions(
+  *,
+  target: str | None,
+  expand_suggestion: bool,
+  limit: int,
+  state: SessionState,
+  hiker: HikerApiClient,
+) -> dict[str, Any]:
+  chosen_target = _resolve_profile_target(target, state)
+  if not chosen_target:
+    return {
+      "ok": False,
+      "error": "target_not_found_in_session",
+      "message": "Provide username/profile URL or load a profile first.",
+    }
+
+  payload = hiker.profile_suggestions(chosen_target, expand_suggestion=expand_suggestion, limit=limit)
+  _update_context_with_stats(state, payload)
+  profiles = payload.get("profiles") if isinstance(payload.get("profiles"), list) else []
+  safe_profiles = [_without_raw(item) for item in profiles if isinstance(item, dict)]
+  _set_last_collection(
+    state,
+    name="profile_suggestions",
+    rows=[item for item in safe_profiles if isinstance(item, dict)],
+    metadata={
+      "target_username": payload.get("target_username"),
+      "eligible_for_chaining": payload.get("eligible_for_chaining"),
+      "limitation": payload.get("limitation"),
+      "source_endpoint": payload.get("source_endpoint"),
+    },
+    filename_hint=f"{payload.get('target_username') or 'profile'}-suggestions",
+  )
+  return {
+    "ok": True,
+    "target_username": payload.get("target_username"),
+    "count": len(safe_profiles),
+    "eligible_for_chaining": payload.get("eligible_for_chaining"),
+    "limitation": payload.get("limitation"),
+    "profiles": safe_profiles,
+  }
+
+
 def _tool_get_last_reel_metric(
   *,
   metric: str,
@@ -2725,10 +4472,10 @@ def _execute_agent_tool(
           days_back = None
       return _tool_search_instagram(
         query=query,
-        limit=max(1, min(limit, 20)),
+        limit=max(1, min(limit, MAX_SEARCH_RESULTS)),
         media_only=media_only,
         today_only=today_only,
-        days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+        days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
         state=state,
         hiker=hiker,
         agent=agent,
@@ -2755,7 +4502,7 @@ def _execute_agent_tool(
         limit = int(raw_limit)
       except (TypeError, ValueError):
         limit = 12
-      limit = max(1, min(limit, 20))
+      limit = max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS))
       return _tool_get_recent_reels(target=target, limit=limit, state=state, hiker=hiker)
 
     if tool_name == "get_profile_reels":
@@ -2775,8 +4522,34 @@ def _execute_agent_tool(
           days_back = None
       return _tool_get_profile_reels(
         target=target_text,
-        limit=max(1, min(limit, 20)),
-        days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+        limit=max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS)),
+        days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_reels_page":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      try:
+        page_size = int(args.get("page_size", MAX_PROFILE_COLLECTION_PAGE_SIZE))
+      except (TypeError, ValueError):
+        page_size = MAX_PROFILE_COLLECTION_PAGE_SIZE
+      days_back_raw = args.get("days_back")
+      if days_back_raw in {None, ""}:
+        days_back = None
+      else:
+        try:
+          days_back = int(days_back_raw)
+        except (TypeError, ValueError):
+          days_back = None
+      return _tool_get_profile_reels_page(
+        target=target_text,
+        page_id=page_text,
+        page_size=max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE)),
+        days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
         state=state,
         hiker=hiker,
       )
@@ -2801,8 +4574,38 @@ def _execute_agent_tool(
         publication_type = "all"
       return _tool_get_profile_publications(
         target=target_text,
-        limit=max(1, min(limit, 20)),
-        days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+        limit=max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS)),
+        days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
+        publication_type=publication_type,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_publications_page":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      try:
+        page_size = int(args.get("page_size", MAX_PROFILE_COLLECTION_PAGE_SIZE))
+      except (TypeError, ValueError):
+        page_size = MAX_PROFILE_COLLECTION_PAGE_SIZE
+      days_back_raw = args.get("days_back")
+      if days_back_raw in {None, ""}:
+        days_back = None
+      else:
+        try:
+          days_back = int(days_back_raw)
+        except (TypeError, ValueError):
+          days_back = None
+      publication_type = str(args.get("publication_type") or "all").strip().lower() or "all"
+      if publication_type not in {"all", "reels", "posts", "carousels"}:
+        publication_type = "all"
+      return _tool_get_profile_publications_page(
+        target=target_text,
+        page_id=page_text,
+        page_size=max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE)),
+        days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
         publication_type=publication_type,
         state=state,
         hiker=hiker,
@@ -2822,6 +4625,24 @@ def _execute_agent_tool(
       page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
       return _tool_get_followers_page(
         target=target,
+        limit=limit,
+        page_id=page_text,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_following_page":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 25))
+      except (TypeError, ValueError):
+        limit = 25
+      limit = max(1, min(limit, 50))
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      return _tool_get_following_page(
+        target=target_text,
         limit=limit,
         page_id=page_text,
         state=state,
@@ -2853,6 +4674,36 @@ def _execute_agent_tool(
         hiker=hiker,
       )
 
+    if tool_name == "search_profile_followers":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      query = str(args.get("query") or "").strip()
+      if not query:
+        return {"ok": False, "error": "missing_query"}
+      force = args.get("force") if isinstance(args.get("force"), bool) else None
+      return _tool_search_profile_followers(
+        target=target_text,
+        query=query,
+        force=force,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "search_profile_following":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      query = str(args.get("query") or "").strip()
+      if not query:
+        return {"ok": False, "error": "missing_query"}
+      force = args.get("force") if isinstance(args.get("force"), bool) else None
+      return _tool_search_profile_following(
+        target=target_text,
+        query=query,
+        force=force,
+        state=state,
+        hiker=hiker,
+      )
+
     if tool_name == "get_media_comments":
       media_url = args.get("media_url")
       media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
@@ -2863,6 +4714,123 @@ def _execute_agent_tool(
       return _tool_get_media_comments(
         media_url=media_url_text,
         limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_media_comments_page":
+      media_url = args.get("media_url")
+      media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      try:
+        page_size = int(args.get("page_size", 15))
+      except (TypeError, ValueError):
+        page_size = 15
+      return _tool_get_media_comments_page(
+        media_url=media_url_text,
+        page_id=page_text,
+        page_size=max(1, min(page_size, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_comment_replies":
+      comment_id = str(args.get("comment_id") or "").strip()
+      if not comment_id:
+        return {"ok": False, "error": "missing_comment_id"}
+      media_url = args.get("media_url")
+      media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      return _tool_get_comment_replies(
+        comment_id=comment_id,
+        media_url=media_url_text,
+        page_id=page_text,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_comment_likers":
+      comment_id = str(args.get("comment_id") or "").strip()
+      if not comment_id:
+        return {"ok": False, "error": "missing_comment_id"}
+      media_id = args.get("media_id")
+      media_id_text = str(media_id).strip() if isinstance(media_id, str) and media_id.strip() else None
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      try:
+        limit = int(args.get("limit", 20))
+      except (TypeError, ValueError):
+        limit = 20
+      return _tool_get_comment_likers(
+        comment_id=comment_id,
+        media_id=media_id_text,
+        page_id=page_text,
+        limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_pinned_publications":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 12))
+      except (TypeError, ValueError):
+        limit = 12
+      return _tool_get_profile_pinned_publications(
+        target=target_text,
+        limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_tagged_publications":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      try:
+        limit = int(args.get("limit", 12))
+      except (TypeError, ValueError):
+        limit = 12
+      return _tool_get_profile_tagged_publications(
+        target=target_text,
+        limit=max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_tagged_publications_page":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      try:
+        page_size = int(args.get("page_size", MAX_PROFILE_COLLECTION_PAGE_SIZE))
+      except (TypeError, ValueError):
+        page_size = MAX_PROFILE_COLLECTION_PAGE_SIZE
+      return _tool_get_profile_tagged_publications_page(
+        target=target_text,
+        page_id=page_text,
+        page_size=max(1, min(page_size, MAX_PROFILE_COLLECTION_PAGE_SIZE)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_media_usertags":
+      media_url = args.get("media_url")
+      media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
+      return _tool_get_media_usertags(
+        media_url=media_url_text,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_media_insight":
+      media_url = args.get("media_url")
+      media_url_text = str(media_url).strip() if isinstance(media_url, str) else None
+      return _tool_get_media_insight(
+        media_url=media_url_text,
         state=state,
         hiker=hiker,
       )
@@ -2891,6 +4859,118 @@ def _execute_agent_tool(
       return _tool_get_profile_highlights(
         target=target_text,
         limit=max(0, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_system_balance":
+      return _tool_get_system_balance(state=state, hiker=hiker)
+
+    if tool_name == "get_hashtag_info":
+      name = str(args.get("name") or "").strip()
+      if not name:
+        return {"ok": False, "error": "missing_name"}
+      return _tool_get_hashtag_info(name=name, state=state, hiker=hiker)
+
+    if tool_name == "get_hashtag_reels":
+      name = str(args.get("name") or "").strip()
+      if not name:
+        return {"ok": False, "error": "missing_name"}
+      try:
+        limit = int(args.get("limit", 12))
+      except (TypeError, ValueError):
+        limit = 12
+      return _tool_get_hashtag_reels(
+        name=name,
+        limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "search_places":
+      query = str(args.get("query") or "").strip()
+      if not query:
+        return {"ok": False, "error": "missing_query"}
+      try:
+        limit = int(args.get("limit", 20))
+      except (TypeError, ValueError):
+        limit = 20
+      lat = args.get("lat")
+      lng = args.get("lng")
+      lat_value = float(lat) if isinstance(lat, (int, float)) else None
+      lng_value = float(lng) if isinstance(lng, (int, float)) else None
+      return _tool_search_places(
+        query=query,
+        lat=lat_value,
+        lng=lng_value,
+        limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_location_recent_media":
+      try:
+        location_pk = int(args.get("location_pk"))
+      except (TypeError, ValueError):
+        return {"ok": False, "error": "missing_location_pk"}
+      try:
+        limit = int(args.get("limit", 12))
+      except (TypeError, ValueError):
+        limit = 12
+      return _tool_get_location_recent_media(
+        location_pk=location_pk,
+        limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "search_music":
+      query = str(args.get("query") or "").strip()
+      if not query:
+        return {"ok": False, "error": "missing_query"}
+      try:
+        limit = int(args.get("limit", 10))
+      except (TypeError, ValueError):
+        limit = 10
+      return _tool_search_music(
+        query=query,
+        limit=max(1, min(limit, 50)),
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_track_media":
+      track_id = str(args.get("track_id") or "").strip()
+      if not track_id:
+        return {"ok": False, "error": "missing_track_id"}
+      page_id = args.get("page_id")
+      page_text = str(page_id).strip() if isinstance(page_id, str) and page_id.strip() else None
+      try:
+        limit = int(args.get("limit", 12))
+      except (TypeError, ValueError):
+        limit = 12
+      stream = bool(args.get("stream"))
+      return _tool_get_track_media(
+        track_id=track_id,
+        page_id=page_text,
+        limit=max(1, min(limit, 50)),
+        stream=stream,
+        state=state,
+        hiker=hiker,
+      )
+
+    if tool_name == "get_profile_suggestions":
+      target = args.get("target")
+      target_text = str(target).strip() if isinstance(target, str) else None
+      expand_suggestion = bool(args.get("expand_suggestion"))
+      try:
+        limit = int(args.get("limit", 20))
+      except (TypeError, ValueError):
+        limit = 20
+      return _tool_get_profile_suggestions(
+        target=target_text,
+        expand_suggestion=expand_suggestion,
+        limit=max(1, min(limit, 50)),
         state=state,
         hiker=hiker,
       )
@@ -3346,8 +5426,8 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
       try:
         payload = hiker.profile_reels(
           target,
-          limit=max(1, min(limit, 20)),
-          days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+          limit=max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS)),
+          days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
         )
         _update_context_with_stats(state, payload)
         reels = payload.get("reels") if isinstance(payload.get("reels"), list) else []
@@ -3398,8 +5478,8 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
         try:
           payload = hiker.profile_publications(
             target,
-            limit=max(1, min(limit, 20)),
-            days_back=max(1, min(days_back, 30)) if isinstance(days_back, int) else None,
+            limit=max(1, min(limit, MAX_PROFILE_COLLECTION_ITEMS)),
+            days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
             publication_type=publication_type,
           )
           _update_context_with_stats(state, payload)
