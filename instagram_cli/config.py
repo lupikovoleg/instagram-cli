@@ -19,15 +19,17 @@ def get_project_root() -> Path:
   return Path(__file__).resolve().parent.parent
 
 
-def get_env_file_path() -> Path:
+def get_env_file_path(env_file: str | Path | None = None) -> Path:
+  if env_file is not None:
+    return Path(env_file).expanduser().resolve()
   override = os.getenv("INSTAGRAM_CLI_ENV_FILE")
   if override:
     return Path(override).expanduser().resolve()
   return (get_project_root() / ".env").resolve()
 
 
-def load_env_file() -> list[Path]:
-  env_path = get_env_file_path()
+def load_env_file(env_file: str | Path | None = None) -> list[Path]:
+  env_path = get_env_file_path(env_file)
   loaded: list[Path] = []
   if env_path.exists():
     # Use own .env as source of truth for this CLI.
@@ -97,9 +99,9 @@ class Settings:
     return (self.openrouter_api_key or "").strip() == "" or (self.hiker_access_key or "").strip() == ""
 
   @classmethod
-  def load(cls) -> "Settings":
-    loaded_env_files = load_env_file()
-    env_file = get_env_file_path()
+  def load(cls, env_file: str | Path | None = None) -> "Settings":
+    loaded_env_files = load_env_file(env_file)
+    env_file = get_env_file_path(env_file)
     return cls(
       loaded_env_files=loaded_env_files,
       env_file=env_file,

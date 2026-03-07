@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "instagram-cli"
-version = "0.1.0"
-description = "Interactive Instagram stats and analysis CLI powered by HikerAPI and OpenRouter."
+version = "0.2.0"
+description = "Instagram analytics toolkit with a terminal CLI, MCP server, and embeddable Python API."
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "mcp[cli]>=1,<2",
@@ -14,6 +15,11 @@ dependencies = [
   "requests>=2.31.0",
   "rich>=13.7.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lupikovoleg/instagram-cli"
+Repository = "https://github.com/lupikovoleg/instagram-cli"
+Documentation = "https://github.com/lupikovoleg/instagram-cli#readme"
 
 [project.scripts]
 instagram = "instagram_cli.main:main"

@@ -59,6 +59,12 @@ This installs two commands:
 - `instagram` for the interactive CLI
 - `instagram-mcp` for the local MCP server
 
+Install as a Python dependency in another project:
+
+```bash
+pip install git+https://github.com/lupikovoleg/instagram-cli.git
+```
+
 ## First Run
 
 The CLI uses its own `.env` file.
@@ -95,6 +101,23 @@ Start the MCP server:
 instagram-mcp
 ```
 
+Use it as a Python library:
+
+```python
+from instagram_cli import InstagramClient
+
+client = InstagramClient.from_env(env_file="/path/to/instagram-cli/.env")
+profile = client.get_profile_stats(target="lupikovoleg")
+```
+
+Custom agent example:
+
+```bash
+python /path/to/instagram-cli/examples/custom_agent.py \
+  --env-file /path/to/instagram-cli/.env \
+  "How many followers does @lupikovoleg have?"
+```
+
 ## MCP Setup
 
 Claude Code:
@@ -127,7 +150,9 @@ Example:
 
 ## Documentation
 
+- Internal Python integration is documented in the [Python library guide](docs/library.md). For your own Python product, prefer direct embedding with `InstagramClient` over MCP.
 - [CLI guide](docs/cli.md)
+- [Python library guide](docs/library.md)
 - [MCP guide](docs/mcp.md)
 - [Architecture](docs/architecture.md)
 - [Troubleshooting and configuration](docs/troubleshooting.md)
@@ -136,5 +161,6 @@ Example:
 
 - CLI mode uses OpenRouter for natural-language tool selection and query expansion.
 - MCP mode does not use OpenRouter internally for search. MCP clients should pass `query_variants` when richer multilingual retrieval is needed.
+- Python library mode uses the same deterministic `InstagramOps` layer as the CLI and MCP server, exposed through `InstagramClient`.
 - Expensive follower and liker analysis is intentionally capped by default to avoid burning HikerAPI credits.
 - Some tools are exact page reads, while sampled ranking tools explicitly mark themselves as approximate.
