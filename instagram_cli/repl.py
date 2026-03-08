@@ -3860,6 +3860,7 @@ def _tool_get_media_comments_page(
   return {
     "ok": True,
     "media": _without_raw(media) if media else None,
+    "count": payload.get("returned_count"),
     "returned_count": payload.get("returned_count"),
     "available_comment_count": payload.get("available_comment_count"),
     "page_id": payload.get("page_id"),

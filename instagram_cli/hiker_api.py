@@ -2077,18 +2077,33 @@ class HikerApiClient:
 
     page_token = (page_id or "").strip() or None
     raw_payload = self._request(
-      "/v1/media/comments/chunk",
+      "/v2/media/comments",
       {
         "id": media_pk,
-        "min_id": page_token,
+        "page_id": page_token,
         "can_support_threading": True,
       },
     )
-    if not isinstance(raw_payload, list) or len(raw_payload) < 2:
-      raise HikerApiError("Unexpected HikerAPI response format for media comments chunk.")
+    if not isinstance(raw_payload, dict):
+      raise HikerApiError("Unexpected HikerAPI response format for media comments page.")
 
-    raw_comments = raw_payload[0] if isinstance(raw_payload[0], list) else []
-    next_page_id = _as_str(raw_payload[1])
+    response = raw_payload.get("response") if isinstance(raw_payload.get("response"), dict) else {}
+    raw_comments = response.get("comments") if isinstance(response.get("comments"), list) else []
+
+    next_page_id = None
+    for candidate in (
+      raw_payload.get("next_page_id"),
+      response.get("next_page_id"),
+      response.get("next_min_id"),
+      response.get("next_max_id"),
+      raw_payload.get("end_cursor"),
+      response.get("end_cursor"),
+    ):
+      next_value = _as_str(candidate)
+      if next_value:
+        next_page_id = next_value
+        break
+
     comments = [
       _normalize_media_comment_payload(item)
       for item in raw_comments[:max(1, min(page_size, 50))]
@@ -2107,7 +2122,7 @@ class HikerApiClient:
       "page_size": max(1, min(page_size, 50)),
       "comments_completeness": "roots_only",
       "replies_loaded": False,
-      "source_endpoint": "/v1/media/comments/chunk",
+      "source_endpoint": "/v2/media/comments",
     }
 
   def comment_replies(
