@@ -11,7 +11,7 @@ from instagram_cli.ops import InstagramOps
 
 
 _TOOL_DESCRIPTIONS: dict[str, str] = {
-  "search_instagram": "Search Instagram by topic with optional media and freshness filters.",
+  "search_instagram": "Search Instagram by topic with adaptive deep pagination, optional media filtering, and freshness filters.",
   "get_profile_stats": "Get Instagram profile stats by username or profile URL.",
   "get_reel_stats": "Get Instagram media stats by reel or post URL.",
   "get_recent_reels": "Get latest reels for a profile.",
@@ -24,7 +24,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
   "get_top_followers": "Get an approximate sampled ranking of the profile's followers by follower count.",
   "search_profile_followers": "Search within a profile's followers for a keyword.",
   "search_profile_following": "Search within a profile's following for a keyword.",
-  "get_media_comments": "Get a root-comments preview for a reel or post.",
+  "get_media_comments": "Get up to 100 root comments for a reel or post with internal pagination.",
   "get_media_comments_page": "Get one cursor-based page of root comments for a reel or post.",
   "get_comment_replies": "Get nested replies for a specific parent comment.",
   "get_comment_likers": "Get users who liked a comment.",
@@ -176,7 +176,7 @@ class InstagramClient(InstagramOps):
     self,
     *,
     query: str,
-    limit: int = 10,
+    limit: int | None = None,
     media_only: bool = False,
     today_only: bool = False,
     days_back: int | None = None,

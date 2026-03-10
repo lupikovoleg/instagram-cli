@@ -179,6 +179,16 @@ See the full example agent loop in [examples/custom_agent.py](/Users/oleglupikov
 
 `InstagramClient.search_instagram(...)` defaults to deterministic search expansion.
 
+Search defaults and limits:
+
+- if `limit` is omitted, the client uses adaptive deep retrieval and targets up to `50` final results
+- if `limit` is specified, the one-shot cap is `100`
+- results include:
+  - `deep_search_used`
+  - `stop_reason`
+  - `api_budget.search_requests`
+  - `api_budget.query_page_counts`
+
 If you want the same LLM-assisted search expansion used by the interactive CLI:
 
 ```python
@@ -189,6 +199,42 @@ client = InstagramClient.from_env(
 ```
 
 That only affects `search_instagram`. All other methods remain deterministic.
+
+Example:
+
+```python
+results = client.search_instagram(
+    query="find 100 reels about Dubai real estate",
+    limit=100,
+    media_only=True,
+)
+
+print(results["count"])
+print(results["deep_search_used"])
+print(results["api_budget"]["search_requests"])
+```
+
+## Comments Behavior
+
+`InstagramClient.get_media_comments(...)` is a high-level bulk root-comment method.
+
+- it paginates internally
+- it returns root comments only
+- it does not include replies unless you call `get_comment_replies`
+- the one-shot cap is `100` root comments per media
+
+Example:
+
+```python
+comments = client.get_media_comments(
+    media_url="https://www.instagram.com/reel/XXXXXXXXXXX/",
+    limit=100,
+)
+
+print(comments["returned_count"])
+print(comments["comments_completeness"])
+print(comments["api_budget"]["page_requests"])
+```
 
 ## Configuration
 

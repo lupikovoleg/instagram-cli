@@ -9,6 +9,7 @@ from typing import Any
 from instagram_cli.config import Settings
 from instagram_cli.hiker_api import HikerApiClient
 from instagram_cli.limits import (
+  MAX_MEDIA_COMMENTS,
   MAX_DAYS_BACK,
   MAX_PROFILE_COLLECTION_ITEMS,
   MAX_PROFILE_COLLECTION_PAGE_SIZE,
@@ -159,7 +160,7 @@ class InstagramOps:
     self,
     *,
     query: str,
-    limit: int = 10,
+    limit: int | None = None,
     media_only: bool = False,
     today_only: bool = False,
     days_back: int | None = None,
@@ -169,7 +170,7 @@ class InstagramOps:
     state = self._state()
     return _tool_search_instagram(
       query=query,
-      limit=max(1, min(limit, MAX_SEARCH_RESULTS)),
+      limit=max(1, min(limit, MAX_SEARCH_RESULTS)) if isinstance(limit, int) else None,
       media_only=media_only,
       today_only=today_only,
       days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
@@ -341,7 +342,7 @@ class InstagramOps:
   def get_media_comments(self, *, media_url: str, limit: int = 20) -> dict[str, Any]:
     return _tool_get_media_comments(
       media_url=media_url,
-      limit=max(1, min(limit, 50)),
+      limit=max(1, min(limit, MAX_MEDIA_COMMENTS)),
       state=self._state(),
       hiker=self.hiker,
     )

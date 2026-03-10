@@ -13,9 +13,9 @@ Terminal-first Instagram analytics, downloads, and MCP tools powered by HikerAPI
 
 ## What It Does
 
-- Search Instagram by topic, including multilingual reel and media discovery
+- Search Instagram by topic with adaptive deep pagination, including multilingual reel and media discovery
 - Filter search results by freshness, including `today` and `last N days`
-- Fetch profile stats, reel stats, comments, likers, followers, following, stories, and highlights
+- Fetch profile stats, reel stats, up to 100 root comments per media, likers, followers, following, stories, and highlights
 - Analyze profile publications from the main grid:
   - reels
   - posts
@@ -87,12 +87,14 @@ Typical commands:
 ```text
 instagram> profile lupikovoleg
 instagram> search portugal creators
+instagram> search reels about dubai attack
 instagram> publications lupikovoleg 10 30 all
-instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 20
+instagram> comments https://www.instagram.com/reel/XXXXXXXXXXX/ 100
 instagram> download media https://www.instagram.com/reel/XXXXXXXXXXX/
 instagram> export csv latest-results
 instagram> how many followers does @lupikovoleg have?
 instagram> find today's reels about an attack on Dubai
+instagram> find 100 reels about Dubai real estate
 ```
 
 Start the MCP server:
@@ -160,7 +162,9 @@ Example:
 ## Project Notes
 
 - CLI mode uses OpenRouter for natural-language tool selection and query expansion.
-- MCP mode does not use OpenRouter internally for search. MCP clients should pass `query_variants` when richer multilingual retrieval is needed.
+- Search is adaptive by default: if `limit` is omitted, the tool can paginate internally up to 50 final results; explicit one-shot search requests are capped at 100.
+- High-level comment collection returns root comments only and can paginate internally up to 100 comments per media.
+- MCP mode does not use OpenRouter internally for search. MCP clients can pass `query_variants` when richer multilingual retrieval is needed.
 - Python library mode uses the same deterministic `InstagramOps` layer as the CLI and MCP server, exposed through `InstagramClient`.
 - Expensive follower and liker analysis is intentionally capped by default to avoid burning HikerAPI credits.
 - Some tools are exact page reads, while sampled ranking tools explicitly mark themselves as approximate.

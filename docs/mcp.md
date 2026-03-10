@@ -140,7 +140,17 @@ Best practice:
 
 - let the MCP client do the reasoning
 - pass translated variants or synonyms in `query_variants`
-- let the server handle merge, dedupe, filtering, and bounded freshness enrichment
+- let the server handle paginated retrieval, merge, dedupe, filtering, and bounded freshness enrichment
+
+Defaults and limits:
+
+- if `limit` is omitted, `search_instagram` uses adaptive deep retrieval and targets up to `50` final results
+- if `limit` is specified, the one-shot cap is `100`
+- the response includes:
+  - `deep_search_used`
+  - `stop_reason`
+  - `api_budget.search_requests`
+  - `api_budget.query_page_counts`
 
 Example ideal search payload:
 
@@ -155,9 +165,27 @@ Example ideal search payload:
   ],
   "media_only": true,
   "today_only": true,
-  "limit": 5
+  "limit": 100
 }
 ```
+
+## Comments Behavior in MCP
+
+`get_media_comments` is now a high-level bulk root-comment tool:
+
+- it paginates internally
+- it deduplicates root comments
+- it can return up to `100` root comments per media
+- it does not include replies unless the client explicitly uses `get_comment_replies`
+
+The response includes:
+
+- `returned_count`
+- `available_comment_count`
+- `comments_completeness = roots_only`
+- `api_budget.page_requests`
+
+Host agents should handle any user confirmation for expensive multi-step workflows themselves. The server does not block those calls interactively.
 
 ## Claude Code Setup
 
@@ -213,10 +241,12 @@ Notes:
 ## Example Prompts for MCP Clients
 
 - `Find today's reels about an attack on Dubai.`
+- `Find 100 reels about Dubai real estate.`
 - `How many followers does @lupikovoleg have?`
 - `Show the last 10 publications from @lupikovoleg.`
 - `Show the latest carousels from @lupikovoleg.`
 - `Get comments for this reel: https://www.instagram.com/reel/XXXXXXXXXXX/`
+- `Get 100 root comments for this reel: https://www.instagram.com/reel/XXXXXXXXXXX/`
 - `Get one page of following for @username.`
 - `Search this profile's followers for coffee accounts.`
 - `Show pinned posts for @username.`

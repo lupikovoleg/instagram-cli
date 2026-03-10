@@ -51,7 +51,7 @@ Collections:
 
 Audience data:
 
-- `comments <instagram_media_url> [limit]` - fetch media comments
+- `comments <instagram_media_url> [limit]` - fetch up to 100 root comments with internal pagination
 - `likers <instagram_media_url> [limit]` - fetch media likers
 - `followers <instagram_profile_url_or_username> [limit]` - fetch one followers page
 - `top-followers <instagram_profile_url_or_username> [sample_size] [top_n]` - estimate biggest followers from a bounded sample
@@ -82,6 +82,7 @@ Search and discovery:
 
 - `Find reels about an attack on Dubai`
 - `Find today's reels about an attack on Dubai`
+- `Find 100 reels about Dubai real estate`
 - `Search Portugal creators`
 - `Open 1`
 
@@ -95,6 +96,7 @@ Profile publications:
 Media audience:
 
 - `Show comments for this reel`
+- `Analyze 100 comments on this reel`
 - `Who liked this post?`
 - `Rank those likers by followers`
 - `Search this profile's following for travel`
@@ -124,12 +126,18 @@ CLI search is a hybrid pipeline:
 
 - the agent interprets the request
 - query expansion can use OpenRouter in CLI mode
-- the tool executes multiple HikerAPI `/gql/topsearch` calls
+- the tool executes multiple paginated HikerAPI `/gql/topsearch` calls
 - results are merged and deduplicated
 - `media_only` filters keep only posts or reels when requested
 - freshness filtering can enrich results with publication timestamps and keep only:
   - `today`
   - `last N days`
+
+Default behavior:
+
+- if `limit` is omitted, search uses adaptive deep retrieval and targets up to `50` final results
+- if `limit` is specified, the one-shot cap is `100`
+- search stops when it has enough filtered results, runs out of pages, or hits the bounded request budget
 
 This means prompts such as `find today's reels about an attack on Dubai` can use:
 
@@ -137,6 +145,23 @@ This means prompts such as `find today's reels about an attack on Dubai` can use
 - translated variants
 - short keyword variants
 - freshness filtering after retrieval
+
+Prompts such as `find 100 reels about Dubai real estate` can continue beyond the first search page without the caller managing cursors manually.
+
+## Comments Behavior
+
+High-level comment collection now paginates internally:
+
+- `get_media_comments` and the `comments` command return root comments only
+- replies are not included unless you explicitly ask for thread depth
+- if `limit` is omitted, typical flows use the default preview size
+- the one-shot cap is `100` root comments per media
+
+If you need nested replies:
+
+1. fetch root comments
+2. choose a `comment_id`
+3. fetch replies for that thread
 
 ## Downloads
 
@@ -194,5 +219,6 @@ Current safeguards:
 - `top-followers` is approximate and bounded
 - expensive enrichment is capped by default
 - request-budget information is surfaced for follower ranking flows
+- the agent should ask for confirmation before combined workflows that imply more than 20 media items or more than 50 comments per media
 
 Use explicit batch jobs for full crawls rather than open-ended chat requests.

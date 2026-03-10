@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 from math import ceil
 import re
 import time
@@ -14,6 +15,8 @@ import requests
 from instagram_cli.config import Settings
 from instagram_cli.limits import (
   MAX_DAYS_BACK,
+  MAX_MEDIA_COMMENTS,
+  MAX_MEDIA_COMMENTS_PAGE_SIZE,
   MAX_PROFILE_COLLECTION_ITEMS,
   MAX_PROFILE_COLLECTION_PAGES,
   MAX_PROFILE_COLLECTION_PAGE_SIZE,
@@ -849,40 +852,76 @@ class HikerApiClient:
     if not media_pk:
       raise HikerApiError("Media has no numeric id for comments lookup.")
 
-    cached = self._media_comments_cache.get(media_pk)
-    if cached is not None:
-      comments_payload = cached
-    else:
-      raw_comments = self._request("/v1/media/comments", {"id": media_pk})
-      if not isinstance(raw_comments, list):
-        raise HikerApiError("Unexpected HikerAPI response format for media comments.")
-      normalized_comments = [
-        _normalize_media_comment_payload(item)
-        for item in raw_comments
-        if isinstance(item, dict)
-      ]
-      comments_payload = {
-        "entity_type": "media_comments",
-        "media": media,
-        "comments": normalized_comments,
-        "returned_count": len(normalized_comments),
-        "available_comment_count": _as_int(media.get("comment_count")),
-        "is_capped": len(normalized_comments) < _as_int(media.get("comment_count")),
-        "comments_completeness": "roots_only",
-        "replies_loaded": False,
-        "cap_note": (
-          "This response contains root comments only. Total comment count may also include nested replies."
-          if len(normalized_comments) < _as_int(media.get("comment_count")) else None
-        ),
-      }
-      self._media_comments_cache[media_pk] = comments_payload
+    requested_limit = max(1, min(limit, MAX_MEDIA_COMMENTS))
+    page_size = min(MAX_MEDIA_COMMENTS_PAGE_SIZE, requested_limit)
+    page_requests = 0
+    page_id: str | None = None
+    seen_comment_ids: set[str] = set()
+    comments: list[dict[str, Any]] = []
+    stop_reason = "requested_limit_reached"
 
-    requested_limit = max(1, min(limit, 50))
-    comments = comments_payload.get("comments") if isinstance(comments_payload.get("comments"), list) else []
+    while len(comments) < requested_limit:
+      try:
+        page = self.media_comments_page(
+          media_url,
+          page_id=page_id,
+          page_size=page_size,
+        )
+      except HikerApiError as exc:
+        message = str(exc)
+        if "Entries not found" in message or "non-existent cursor" in message:
+          stop_reason = "no_more_pages"
+          break
+        raise
+      page_requests += 1
+      page_comments = page.get("comments") if isinstance(page.get("comments"), list) else []
+      new_comments_in_page = 0
+      for comment in page_comments:
+        if not isinstance(comment, dict):
+          continue
+        comment_id = _as_str(comment.get("comment_id") or comment.get("pk") or comment.get("id"))
+        dedupe_key = comment_id or json.dumps(comment, ensure_ascii=False, sort_keys=True)
+        if dedupe_key in seen_comment_ids:
+          continue
+        seen_comment_ids.add(dedupe_key)
+        comments.append(comment)
+        new_comments_in_page += 1
+        if len(comments) >= requested_limit:
+          break
+
+      next_page_id = _as_str(page.get("next_page_id"))
+      if len(comments) >= requested_limit:
+        stop_reason = "requested_limit_reached"
+        break
+      if not next_page_id:
+        stop_reason = "no_more_pages"
+        break
+      if new_comments_in_page == 0:
+        stop_reason = "duplicate_page"
+        break
+      page_id = next_page_id
+
+    returned_count = len(comments)
+    available_comment_count = _as_int(media.get("comment_count"))
     return {
-      **comments_payload,
-      "comments": comments[:requested_limit],
-      "returned_count": min(len(comments), requested_limit),
+      "entity_type": "media_comments",
+      "media": media,
+      "comments": comments,
+      "count": returned_count,
+      "returned_count": returned_count,
+      "available_comment_count": available_comment_count,
+      "is_capped": returned_count < available_comment_count,
+      "comments_completeness": "roots_only",
+      "replies_loaded": False,
+      "cap_note": (
+        "This response contains root comments only. Total comment count may also include nested replies."
+        if returned_count < available_comment_count else None
+      ),
+      "source_endpoint": "/v2/media/comments",
+      "stop_reason": stop_reason,
+      "api_budget": {
+        "page_requests": page_requests,
+      },
     }
 
   @staticmethod

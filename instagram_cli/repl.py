@@ -37,9 +37,17 @@ from instagram_cli.hiker_api import (
   extract_reel_shortcode,
 )
 from instagram_cli.limits import (
+  DEFAULT_DEEP_SEARCH_RESULTS,
+  MAX_MEDIA_COMMENTS,
+  MAX_MEDIA_COMMENTS_PAGE_SIZE,
   MAX_DAYS_BACK,
   MAX_PROFILE_COLLECTION_ITEMS,
   MAX_PROFILE_COLLECTION_PAGE_SIZE,
+  MAX_SEARCH_ENRICHED_MEDIA,
+  MAX_SEARCH_PAGE_ITEMS,
+  MAX_SEARCH_PAGES_PER_QUERY,
+  MAX_SEARCH_QUERY_VARIANTS,
+  MAX_SEARCH_REQUESTS,
   MAX_SEARCH_RESULTS,
 )
 from instagram_cli.openrouter_agent import OpenRouterAgent, OpenRouterAgentError
@@ -83,7 +91,10 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
           },
           "limit": {
             "type": "integer",
-            "description": f"How many search results to return (1..{MAX_SEARCH_RESULTS})",
+            "description": (
+              f"Optional number of search results to return (1..{MAX_SEARCH_RESULTS}). "
+              f"If omitted, use adaptive deep search up to {DEFAULT_DEEP_SEARCH_RESULTS}."
+            ),
             "minimum": 1,
             "maximum": MAX_SEARCH_RESULTS,
           },
@@ -446,7 +457,8 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
     "function": {
       "name": "get_media_comments",
       "description": (
-        "Get comments for an Instagram reel or post URL. "
+        "Get root comments for an Instagram reel or post URL. "
+        "This high-level tool can paginate internally to collect up to 100 root comments. "
         "If media_url is omitted, use the current reel or post from session context."
       ),
       "parameters": {
@@ -458,9 +470,9 @@ _AGENT_TOOL_SPECS: list[dict[str, Any]] = [
           },
           "limit": {
             "type": "integer",
-            "description": "How many comments to return (1..50)",
+            "description": f"How many root comments to return (1..{MAX_MEDIA_COMMENTS})",
             "minimum": 1,
-            "maximum": 50,
+            "maximum": MAX_MEDIA_COMMENTS,
           },
         },
         "additionalProperties": False,
@@ -1383,14 +1395,22 @@ def _enrich_search_media_candidates(
 ) -> dict[str, int]:
   media_candidates = [
     item for item in items
-    if isinstance(item, dict) and item.get("result_type") == "media" and _search_result_url(item)
+    if (
+      isinstance(item, dict)
+      and item.get("result_type") == "media"
+      and _search_result_url(item)
+      and _search_item_datetime(item) is None
+    )
   ]
   if not media_candidates:
-    return {"media_info_lookups": 0, "media_candidates_enriched": 0}
+    return {"media_info_lookups": 0, "media_candidates_enriched": 0, "media_info_failures": 0}
 
   budget_cap = min(
     len(media_candidates),
-    min(30, max(limit * (3 if (today_only or days_back is not None) else 2), 12)),
+    min(
+      MAX_SEARCH_ENRICHED_MEDIA,
+      max(limit * (3 if (today_only or days_back is not None) else 2), 20),
+    ),
   )
   selected = media_candidates[:budget_cap]
 
@@ -1401,10 +1421,15 @@ def _enrich_search_media_candidates(
     return item, hiker.media_info(url)
 
   lookup_count = 0
+  failure_count = 0
   with ThreadPoolExecutor(max_workers=min(4, budget_cap)) as executor:
     futures = [executor.submit(load_media, item) for item in selected]
     for future in as_completed(futures):
-      item, media = future.result()
+      try:
+        item, media = future.result()
+      except HikerApiError:
+        failure_count += 1
+        continue
       lookup_count += 1
       item["published_at_local"] = media.get("published_at_local")
       item["published_at_utc"] = media.get("published_at_utc")
@@ -1423,7 +1448,73 @@ def _enrich_search_media_candidates(
   return {
     "media_info_lookups": lookup_count,
     "media_candidates_enriched": budget_cap,
+    "media_info_failures": failure_count,
   }
+
+
+def _filter_search_items(
+  *,
+  items: list[dict[str, Any]],
+  hiker: HikerApiClient,
+  requested_limit: int,
+  media_only: bool,
+  today_only: bool,
+  days_back: int | None,
+) -> tuple[list[dict[str, Any]], dict[str, int], list[str]]:
+  filtered_items = sorted(items, key=_search_sort_key)
+  if media_only:
+    filtered_items = [item for item in filtered_items if item.get("result_type") == "media"]
+
+  budget = {"media_info_lookups": 0, "media_candidates_enriched": 0, "media_info_failures": 0}
+  notes: list[str] = []
+  if not (today_only or days_back is not None):
+    return filtered_items, budget, notes
+
+  if filtered_items:
+    enrichment = _enrich_search_media_candidates(
+      items=filtered_items,
+      hiker=hiker,
+      limit=requested_limit,
+      today_only=today_only,
+      days_back=days_back,
+    )
+    budget.update(enrichment)
+    media_candidates = [
+      item for item in filtered_items
+      if isinstance(item, dict) and item.get("result_type") == "media"
+    ]
+    if enrichment["media_candidates_enriched"] < len(media_candidates):
+      notes.append(
+        "Freshness filtering was applied to a bounded subset of media candidates to control API spend."
+      )
+    if enrichment.get("media_info_failures"):
+      notes.append(
+        "Some search candidates could not be enriched for freshness filtering and were skipped."
+      )
+
+  now_local = datetime.now().astimezone()
+  cutoff = now_local - timedelta(days=days_back) if isinstance(days_back, int) else None
+  date_filtered: list[dict[str, Any]] = []
+  for item in filtered_items:
+    dt = _search_item_datetime(item)
+    if dt is None:
+      continue
+    dt_local = dt.astimezone()
+    if today_only and dt_local.date() != now_local.date():
+      continue
+    if cutoff is not None and dt_local < cutoff:
+      continue
+    date_filtered.append(item)
+
+  ranked = sorted(
+    date_filtered,
+    key=lambda item: (
+      -(int(_search_item_datetime(item).timestamp()) if _search_item_datetime(item) is not None else 0),
+      -int(item.get("search_hits") or 0),
+      int(item.get("best_rank") or 9999),
+    ),
+  )
+  return ranked, budget, notes
 
 
 def _print_search_results(data: dict[str, Any]) -> None:
@@ -1444,12 +1535,23 @@ def _print_search_results(data: dict[str, Any]) -> None:
   if query_variants:
     print(f"queries used: {', '.join(str(item) for item in query_variants)}")
   print(f"returned: {data.get('count', 0)} / {data.get('available_count', 0)}")
+  print(
+    f"deep search: {'yes' if data.get('deep_search_used') else 'no'}"
+    f" | stop_reason={data.get('stop_reason') or 'unknown'}"
+    f" | more_available={bool(data.get('more_available'))}"
+  )
   budget = data.get("api_budget") if isinstance(data.get("api_budget"), dict) else {}
   if budget:
+    query_page_counts = budget.get("query_page_counts") if isinstance(budget.get("query_page_counts"), dict) else {}
+    query_pages_text = (
+      ", ".join(f"{query_text}:{page_count}" for query_text, page_count in query_page_counts.items())
+      if query_page_counts else "none"
+    )
     print(
       "api budget: "
       f"search_requests={budget.get('search_requests', 0)}, "
-      f"media_info_lookups={budget.get('media_info_lookups', 0)}"
+      f"media_info_lookups={budget.get('media_info_lookups', 0)}, "
+      f"query_pages={query_pages_text}"
     )
   notes = data.get("notes") if isinstance(data.get("notes"), list) else []
   for note in notes:
@@ -1646,7 +1748,14 @@ def _print_media_comments(data: dict[str, Any]) -> None:
   media = data.get("media") if isinstance(data.get("media"), dict) else {}
   print("\n[Media comments]")
   print(f"url: {media.get('url')}")
-  print(f"returned: {data.get('returned_count', 0)}")
+  print(
+    f"returned: {data.get('returned_count', 0)} / {data.get('available_comment_count', 0)}"
+    f" | completeness={data.get('comments_completeness') or 'unknown'}"
+    f" | stop_reason={data.get('stop_reason') or 'unknown'}"
+  )
+  budget = data.get("api_budget") if isinstance(data.get("api_budget"), dict) else {}
+  if budget:
+    print(f"api budget: page_requests={budget.get('page_requests', 0)}")
   if data.get("cap_note"):
     print(f"note: {data.get('cap_note')}")
   comments = data.get("comments") if isinstance(data.get("comments"), list) else []
@@ -1770,7 +1879,7 @@ def _print_help() -> None:
     "\nCommands:\n"
     "- help: show this help\n"
     "- actions: show available actions\n"
-    "- search <query>: discover profiles/media by topic with multilingual expansion\n"
+    "- search <query>: deep topic discovery with adaptive pagination and multilingual expansion\n"
     "- open [url|@username|index|profile|reel]: open a result in the default browser\n"
     "- reel <instagram_reel_url>: fetch reel stats\n"
     "- profile <instagram_profile_url_or_username>: fetch profile stats\n"
@@ -2832,7 +2941,7 @@ def _tool_get_profile_stats(
 def _tool_search_instagram(
   *,
   query: str,
-  limit: int,
+  limit: int | None,
   media_only: bool,
   today_only: bool,
   days_back: int | None,
@@ -2841,7 +2950,8 @@ def _tool_search_instagram(
   hiker: HikerApiClient,
   agent: OpenRouterAgent | None = None,
 ) -> dict[str, Any]:
-  requested_limit = max(1, min(limit, MAX_SEARCH_RESULTS))
+  explicit_limit = isinstance(limit, int)
+  requested_limit = max(1, min(limit, MAX_SEARCH_RESULTS)) if explicit_limit else DEFAULT_DEEP_SEARCH_RESULTS
   inferred = _infer_search_preferences(query)
   effective_today_only = today_only or bool(inferred.get("today_only"))
   effective_days_back = days_back if isinstance(days_back, int) else inferred.get("days_back")
@@ -2881,92 +2991,140 @@ def _tool_search_instagram(
     str(item).strip()
     for item in query_plan.get("queries", [])
     if isinstance(item, str) and str(item).strip()
-  ][:5]
+  ][:MAX_SEARCH_QUERY_VARIANTS]
   if not query_variants:
     query_variants = [query.strip()]
 
-  per_query_limit = min(12, max(requested_limit, 8))
+  per_query_limit = min(MAX_SEARCH_PAGE_ITEMS, max(requested_limit, 12))
   merged: dict[str, dict[str, Any]] = {}
-  more_available = False
-  search_requests = 0
-
-  for variant in query_variants:
-    payload = hiker.topsearch(variant, limit=per_query_limit, flat=True)
-    search_requests += 1
-    more_available = more_available or bool(payload.get("more_available"))
-    items = payload.get("items") if isinstance(payload.get("items"), list) else []
-    for rank, raw_item in enumerate(items, start=1):
-      if not isinstance(raw_item, dict):
-        continue
-      item = dict(raw_item)
-      if item.get("result_type") == "profile":
-        item["profile_url"] = _profile_url(str(item.get("username") or "").strip())
-      key = _search_result_key(item)
-      existing = merged.get(key)
-      if existing is None:
-        item["matched_queries"] = [variant]
-        item["search_hits"] = 1
-        item["best_rank"] = rank
-        merged[key] = item
-        continue
-      existing["search_hits"] = int(existing.get("search_hits") or 0) + 1
-      existing["best_rank"] = min(int(existing.get("best_rank") or rank), rank)
-      matched_queries = existing.get("matched_queries") if isinstance(existing.get("matched_queries"), list) else []
-      if variant not in matched_queries:
-        matched_queries.append(variant)
-      existing["matched_queries"] = matched_queries
-      for field_name, field_value in item.items():
-        if field_name in {"matched_queries", "search_hits", "best_rank"}:
-          continue
-        if _is_missing_value(existing.get(field_name)) and not _is_missing_value(field_value):
-          existing[field_name] = field_value
-
-  items = sorted(merged.values(), key=_search_sort_key)
-  if effective_media_only:
-    items = [item for item in items if item.get("result_type") == "media"]
-
-  budget = {"search_requests": search_requests, "media_info_lookups": 0, "media_candidates_enriched": 0}
+  budget = {
+    "search_requests": 0,
+    "query_page_counts": {},
+    "media_info_lookups": 0,
+    "media_candidates_enriched": 0,
+    "media_info_failures": 0,
+  }
   notes: list[str] = []
-  if effective_today_only or effective_days_back is not None:
-    if items:
-      enrichment = _enrich_search_media_candidates(
-        items=items,
-        hiker=hiker,
-        limit=requested_limit,
-        today_only=effective_today_only,
-        days_back=effective_days_back,
-      )
-      budget.update(enrichment)
-      media_count = len(items)
-      if enrichment["media_candidates_enriched"] < media_count:
-        notes.append(
-          "Freshness filtering was applied only to the top media candidates to keep API spend bounded."
-        )
 
-    now_local = datetime.now().astimezone()
-    cutoff = now_local - timedelta(days=effective_days_back) if isinstance(effective_days_back, int) else None
-    filtered_items: list[dict[str, Any]] = []
-    for item in items:
-      dt = _search_item_datetime(item)
-      if dt is None:
+  def merge_item(raw_item: dict[str, Any], *, variant: str, rank: int) -> None:
+    item = dict(raw_item)
+    if item.get("result_type") == "profile":
+      item["profile_url"] = _profile_url(str(item.get("username") or "").strip())
+    key = _search_result_key(item)
+    existing = merged.get(key)
+    if existing is None:
+      item["matched_queries"] = [variant]
+      item["search_hits"] = 1
+      item["best_rank"] = rank
+      merged[key] = item
+      return
+    existing["search_hits"] = int(existing.get("search_hits") or 0) + 1
+    existing["best_rank"] = min(int(existing.get("best_rank") or rank), rank)
+    matched_queries = existing.get("matched_queries") if isinstance(existing.get("matched_queries"), list) else []
+    if variant not in matched_queries:
+      matched_queries.append(variant)
+    existing["matched_queries"] = matched_queries
+    for field_name, field_value in item.items():
+      if field_name in {"matched_queries", "search_hits", "best_rank"}:
         continue
-      dt_local = dt.astimezone()
-      if effective_today_only and dt_local.date() != now_local.date():
-        continue
-      if cutoff is not None and dt_local < cutoff:
-        continue
-      filtered_items.append(item)
-    items = sorted(
-      filtered_items,
-      key=lambda item: (
-        -(int(_search_item_datetime(item).timestamp()) if _search_item_datetime(item) is not None else 0),
-        -int(item.get("search_hits") or 0),
-        int(item.get("best_rank") or 9999),
-      ),
+      if _is_missing_value(existing.get(field_name)) and not _is_missing_value(field_value):
+        existing[field_name] = field_value
+
+  query_states = [
+    {
+      "query": variant,
+      "end_cursor": None,
+      "more_available": True,
+      "pages_loaded": 0,
+    }
+    for variant in query_variants
+  ]
+
+  filtered_items: list[dict[str, Any]] = []
+  stop_reason = "requested_limit_reached"
+
+  def refresh_filtered_items() -> None:
+    nonlocal filtered_items
+    ranked, filter_budget, filter_notes = _filter_search_items(
+      items=list(merged.values()),
+      hiker=hiker,
+      requested_limit=requested_limit,
+      media_only=effective_media_only,
+      today_only=effective_today_only,
+      days_back=effective_days_back,
     )
+    filtered_items = ranked
+    budget["media_info_lookups"] = int(budget["media_info_lookups"]) + int(filter_budget.get("media_info_lookups", 0))
+    budget["media_candidates_enriched"] = int(budget["media_candidates_enriched"]) + int(filter_budget.get("media_candidates_enriched", 0))
+    for note in filter_notes:
+      if note not in notes:
+        notes.append(note)
 
-  final_items = items[:requested_limit]
+  while int(budget["search_requests"]) < MAX_SEARCH_REQUESTS:
+    progress_in_round = False
+    for query_state in query_states:
+      if query_state["pages_loaded"] >= MAX_SEARCH_PAGES_PER_QUERY:
+        query_state["more_available"] = False
+        continue
+      if not query_state["more_available"] and query_state["pages_loaded"] > 0:
+        continue
+
+      payload = hiker.topsearch(
+        query_state["query"],
+        limit=per_query_limit,
+        end_cursor=query_state["end_cursor"],
+        flat=True,
+      )
+      budget["search_requests"] = int(budget["search_requests"]) + 1
+      query_state["pages_loaded"] = int(query_state["pages_loaded"]) + 1
+      budget["query_page_counts"][query_state["query"]] = int(query_state["pages_loaded"])
+      query_state["end_cursor"] = payload.get("end_cursor")
+      query_state["more_available"] = bool(payload.get("more_available"))
+
+      items = payload.get("items") if isinstance(payload.get("items"), list) else []
+      for rank, raw_item in enumerate(items, start=1):
+        if isinstance(raw_item, dict):
+          merge_item(raw_item, variant=str(query_state["query"]), rank=rank)
+
+      progress_in_round = progress_in_round or bool(items)
+
+      if int(budget["search_requests"]) >= MAX_SEARCH_REQUESTS:
+        break
+
+    refresh_filtered_items()
+
+    if len(filtered_items) >= requested_limit:
+      stop_reason = "requested_limit_reached"
+      break
+
+    active_queries = [
+      query_state
+      for query_state in query_states
+      if query_state.get("more_available") and int(query_state.get("pages_loaded") or 0) < MAX_SEARCH_PAGES_PER_QUERY
+    ]
+    if not active_queries:
+      stop_reason = (
+        "filters_exhausted"
+        if len(filtered_items) < len(merged)
+        and (effective_media_only or effective_today_only or effective_days_back is not None)
+        else "no_more_pages"
+      )
+      break
+
+    if not progress_in_round:
+      stop_reason = "no_more_pages"
+      break
+  else:
+    refresh_filtered_items()
+    stop_reason = "budget_exhausted"
+
+  final_items = filtered_items[:requested_limit]
   safe_items = [_without_raw(item) for item in final_items if isinstance(item, dict)]
+  more_available = any(
+    query_state.get("more_available") and int(query_state.get("pages_loaded") or 0) < MAX_SEARCH_PAGES_PER_QUERY
+    for query_state in query_states
+  )
+  deep_search_used = any(int(query_state.get("pages_loaded") or 0) > 1 for query_state in query_states)
   payload = {
     "entity_type": "search_results",
     "query": query.strip(),
@@ -2980,8 +3138,10 @@ def _tool_search_instagram(
       "days_back": effective_days_back,
     },
     "count": len(safe_items),
-    "available_count": len(items),
+    "available_count": len(filtered_items),
     "more_available": more_available,
+    "deep_search_used": deep_search_used,
+    "stop_reason": stop_reason,
     "source_endpoint": "/gql/topsearch",
     "api_budget": budget,
     "notes": notes,
@@ -3000,6 +3160,8 @@ def _tool_search_instagram(
       "filters": payload.get("filters"),
       "available_count": payload["available_count"],
       "more_available": payload["more_available"],
+      "deep_search_used": payload.get("deep_search_used"),
+      "stop_reason": payload.get("stop_reason"),
       "source_endpoint": payload["source_endpoint"],
       "api_budget": payload.get("api_budget"),
     },
@@ -3378,17 +3540,27 @@ def _tool_get_media_comments(
     metadata={
       "media_url": (media or {}).get("url"),
       "shortcode": (media or {}).get("shortcode"),
+      "count": payload.get("count"),
       "available_comment_count": payload.get("available_comment_count"),
+      "comments_completeness": payload.get("comments_completeness"),
       "cap_note": payload.get("cap_note"),
+      "source_endpoint": payload.get("source_endpoint"),
+      "stop_reason": payload.get("stop_reason"),
+      "api_budget": payload.get("api_budget"),
     },
     filename_hint=f"{(media or {}).get('shortcode') or 'media'}-comments",
   )
   return {
     "ok": True,
     "media": _without_raw(media) if media else None,
+    "count": payload.get("count"),
     "returned_count": payload.get("returned_count"),
     "available_comment_count": payload.get("available_comment_count"),
+    "comments_completeness": payload.get("comments_completeness"),
     "cap_note": payload.get("cap_note"),
+    "source_endpoint": payload.get("source_endpoint"),
+    "stop_reason": payload.get("stop_reason"),
+    "api_budget": payload.get("api_budget"),
     "comments": safe_comments,
   }
 
@@ -4457,10 +4629,14 @@ def _execute_agent_tool(
       query = str(args.get("query") or "").strip()
       if not query:
         return {"ok": False, "error": "missing_query"}
-      try:
-        limit = int(args.get("limit", 10))
-      except (TypeError, ValueError):
-        limit = 10
+      limit_raw = args.get("limit")
+      if limit_raw in {None, ""}:
+        limit = None
+      else:
+        try:
+          limit = int(limit_raw)
+        except (TypeError, ValueError):
+          limit = None
       media_only = bool(args.get("media_only"))
       today_only = bool(args.get("today_only"))
       days_back_raw = args.get("days_back")
@@ -4473,7 +4649,7 @@ def _execute_agent_tool(
           days_back = None
       return _tool_search_instagram(
         query=query,
-        limit=max(1, min(limit, MAX_SEARCH_RESULTS)),
+        limit=max(1, min(limit, MAX_SEARCH_RESULTS)) if isinstance(limit, int) else None,
         media_only=media_only,
         today_only=today_only,
         days_back=max(1, min(days_back, MAX_DAYS_BACK)) if isinstance(days_back, int) else None,
@@ -4714,7 +4890,7 @@ def _execute_agent_tool(
         limit = 20
       return _tool_get_media_comments(
         media_url=media_url_text,
-        limit=max(1, min(limit, 50)),
+        limit=max(1, min(limit, MAX_MEDIA_COMMENTS)),
         state=state,
         hiker=hiker,
       )
@@ -5364,7 +5540,7 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
       try:
         result = _tool_search_instagram(
           query=query,
-          limit=10,
+          limit=None,
           media_only=False,
           today_only=False,
           days_back=None,
@@ -5558,7 +5734,7 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
       try:
         result = _tool_get_media_comments(
           media_url=target,
-          limit=max(1, min(limit, 50)),
+          limit=max(1, min(limit, MAX_MEDIA_COMMENTS)),
           state=state,
           hiker=hiker,
         )
@@ -5568,9 +5744,13 @@ def run_repl(settings: Settings, *, update_status: GitUpdateStatus | None = None
         _print_media_comments(
           {
             "media": result.get("media"),
+            "count": result.get("count"),
             "returned_count": result.get("returned_count"),
             "available_comment_count": result.get("available_comment_count"),
+            "comments_completeness": result.get("comments_completeness"),
             "cap_note": result.get("cap_note"),
+            "stop_reason": result.get("stop_reason"),
+            "api_budget": result.get("api_budget"),
             "comments": result.get("comments"),
           },
         )

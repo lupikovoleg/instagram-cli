@@ -55,9 +55,11 @@ def _mcp_instructions() -> str:
     "This server is stateless for targets: pass explicit usernames or media URLs to tools. "
     "For search_instagram, the MCP client may supply query_variants with translations or synonyms. "
     "The server does not use OpenRouter internally for MCP search expansion. "
+    "search_instagram uses adaptive deep search by default when limit is omitted, and supports explicit limits up to 100 final results. "
     "For profile reels or publications beyond the single-call collection limit, use the cursor-based page tools and continue with next_page_id. "
     "Treat tools as exact unless the payload explicitly says approximate=true or includes an approximation_note/limitation. "
     "For comments, get_media_comments and get_media_comments_page return root comments only; use get_comment_replies for nested replies when the task requires full thread depth. "
+    "MCP clients should handle cost confirmation themselves when they plan multi-step workflows over large media or comment sets. "
     "Use hashtag, place, music, tagged, pinned, following, and suggested-profile tools instead of generic search when the user intent clearly matches those entities. "
     "Most tools return a result_id. Use read_result or export_result for follow-up actions on that stored result."
   )
@@ -181,13 +183,14 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
 
   @server.tool(
     description=(
-      "Search Instagram by topic with optional client-supplied query_variants, media filtering, and freshness filters. "
+      "Search Instagram by topic with adaptive deep pagination, optional client-supplied query_variants, media filtering, and freshness filters. "
+      "If limit is omitted, the server targets up to 50 final results by default. "
       "In MCP mode this tool is deterministic and does not call OpenRouter internally."
     ),
   )
   def search_instagram(
     query: str,
-    limit: int = 10,
+    limit: int | None = None,
     media_only: bool = False,
     today_only: bool = False,
     days_back: int | None = None,
@@ -298,7 +301,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
   def search_profile_following(target: str, query: str, force: bool | None = None) -> dict[str, Any]:
     return safe_tool(ops.search_profile_following)(target=target, query=query, force=force)
 
-  @server.tool(description="Get comments for an Instagram reel or post URL.")
+  @server.tool(description="Get up to 100 root comments for an Instagram reel or post URL with internal pagination.")
   def get_media_comments(media_url: str, limit: int = 20) -> dict[str, Any]:
     return safe_tool(ops.get_media_comments)(media_url=media_url, limit=limit)
 
